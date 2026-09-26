@@ -1,12 +1,12 @@
 #!/bin/sh
-# OxiDNS 三流水线沙箱验收。用法: sh probe.sh [默认端口] [混合端口] [国内端口]
-P=${1:-15335}; M=${2:-15336}; C=${3:-15337}
+# OxiDNS 三流水线验收。用法: sh probe.sh [默认端口] [混合端口] [国内端口] [DNS主机]
+P=${1:-15335}; M=${2:-15336}; C=${3:-15337}; H=${4:-127.0.0.1}
 FAILS=0
 ok()  { echo "PASS  $1"; }
 ng()  { echo "FAIL  $1"; FAILS=$((FAILS+1)); }
 ip4() { echo "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; }
 fake(){ echo "$1" | grep -q '^28\.'; }
-dg()  { p=$1; shift; dig +time=4 +tries=1 "$@" @127.0.0.1 -p "$p" 2>&1; }
+dg()  { p=$1; shift; dig +time=4 +tries=1 "$@" @$H -p "$p" 2>&1; }
 # 取第一个真实 IPv4 答案（+short 会把 CNAME 行排在前面，必须过滤）
 a4()  { dg "$1" +short A "$2" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n1; }
 # 取第一个 fake-ip 答案

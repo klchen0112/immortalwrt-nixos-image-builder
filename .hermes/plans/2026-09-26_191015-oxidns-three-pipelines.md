@@ -899,6 +899,68 @@ dnsmasq 全程不动（`:53` → `127.0.0.1#5335` 不变），所以回滚只涉
 
 ---
 
+## 8. 执行记录（2026-09-26 19:19–19:30 CST）——含 3 处与计划的偏差
+
+**T1–T13 全部执行完毕。** 关键证据：
+
+| 阶段 | 结果 |
+|---|---|
+| RED（旧配置干净目录实启） | `Plugin initialization failed: startup download failed ... -> '/etc/mihomo/rules/geosite.dat'`（就是根因） |
+| `check` 沙箱 + 生产 | `Configuration is valid: … (plugins: 34)`；`--graph` 缩进 0 行只有 6 server + `subscription_cron`（无孤儿） |
+| `export-dat` | 9 个 geosite selector 全部有输出（cn 111416 / ads 192056 / …），瞎编 selector 正确报 `matched no selector` → checker 有效 |
+| 沙箱实启（15335/15336/15337） | `readyz=ready`；`probe.sh` **ALL PASS** |
+| 生产 oxidns | pid 30500，RSS 142M，5335/5336/5337 + 9199 全部 listening，`readyz=ready`，**无 crash loop** |
+| 生产验收（对路由器跑 probe.sh） | **ALL PASS 10/10** |
+| 端到端 | google/github/youtube/baidu 全 200；工作站 `getent www.google.com` → `28.0.0.12` |
+| mihomo | `mihomo -t` = test is successful；重启后 nft 规则数 2/2 未翻倍；`redir-port 7899 / tproxy-port 7895` 正常 |
+| A1 前后对比 | `detectportal.firefox.com` 28.0.0.161→`151.101.129.91`、`pool.ntp.org` 28.0.0.164→`119.28.206.193`、`network-test.debian.org` 28.0.0.163→`151.101.2.132`、`resolver1.opendns.com`→`208.67.222.222`；对照组 `www.google.com` 仍 `28.0.0.12` |
+| git | `1849551` oxidns 三流水线；mihomo 改动单独一条 commit |
+
+### 偏差 1（计划假设错误，必须修）：dnsmasq 其实**从来没在用** oxidns
+
+计划里写「dnsmasq 全程不动」，因为它 `server=127.0.0.1#5335`。实测：dnsmasq 同时还吃 `resolv-file=/tmp/resolv.conf.d/resolv.conf.auto`（→ 192.168.6.1），**5/5 次都挑了 ISP**，于是 LAN 拿到被污染的真实 IP（`www.google.com` → `69.171.235.22`）而不是 fake-ip，google/github 的 curl 直接超时。
+
+```bash
+ssh root@192.168.10.1 'uci set dhcp.@dnsmasq[0].noresolv="1"; uci commit dhcp; /etc/init.d/dnsmasq restart'
+```
+改后：`:53` → google `28.0.0.12`（fake-ip ✓）、baidu `36.152.44.93` ✓、doubleclick `0.0.0.0` ✓、curl 全 200。
+**回滚**：`uci delete dhcp.@dnsmasq[0].noresolv; uci commit dhcp; /etc/init.d/dnsmasq restart`。（副作用：oxidns 挂掉时 LAN 没有 ISP 兜底——这正是 fake-ip 设计的必要代价。）
+
+### 偏差 2（同上连带发现）：`hosts` 内网映射被 dnsmasq 的 rebind 保护吞掉
+
+`rebind_protection=1` → 「discard upstream RFC1918 responses」→ oxidns `hosts` 返回的 192.168.x.x 被丢，5 个 DDNS 名经 `:53` 全部返回空。
+
+```bash
+ssh root@192.168.10.1 'uci add_list dhcp.@dnsmasq[0].rebind_domain="klchen.duckdns.org"; uci commit dhcp; /etc/init.d/dnsmasq restart'
+```
+生成 `rebind-domain-ok=klchen.duckdns.org`，改后 5 个名字全部正确返回 192.168.10.248 / .0.197 / .0.198 / .0.199 / .0.210 ✓。
+**回滚**：`uci del_list dhcp.@dnsmasq[0].rebind_domain="klchen.duckdns.org"; uci commit dhcp; /etc/init.d/dnsmasq restart`。
+
+### 偏差 3（计划外，但实测证明是 A1 的前置条件）：混合链加防污染
+
+沙箱实测发现：`mixed_pipeline` 原先用 `has_resp` 收口，于是**国内 DNS 对国外域名的污染答案会被直接采信**（`www.google.com`：国内上游给 `69.171.235.22`/`174.132.167.252`，真值是 `142.251.x`），永远走不到国外 DoH。A1 修好后，`rule-set:fakeipfilter_!cn` 名单里的国外域名正是走 5336 拿真实 IP —— 不修就是"把 fake-ip 换成污染 IP"的倒退，所以一并改了：
+
+```yaml
+      - exec: $cn_dns
+      - matches: resp_ip $geoip_cn     # 只有答案真落在 CN 才认（原来是无条件 has_resp）
+        exec: accept
+```
+沙箱 + 生产双重验证：5336 的 `www.google.com` → `142.251.157.119`（真实），`www.baidu.com`/`www.taobao.com` 仍是国内 IP（本地判定，不多绕一跳）；5335/5337 不受影响。
+**回滚**：把这两行换回 `$cn_pipeline` + `has_resp`。
+
+### 本次**没有**做的（等你拍板，见附录 A）
+
+`A2`（`secret` 值）、`A3`（`authentication` 凭据）、`A4`（`:6666` 收紧成 loopback）、`A7` 的删冗余 dat（`/etc/mihomo/rules/{geoip.dat,geoip.metadb,geosite.dat}` ≈ 28M，mihomo 用的是 `/etc/mihomo/` 根目录那份，删 rules/ 里的不影响它）、`A8`（sniffer）、`A9`（订阅 interval）、`A10`（ui URL）、`A11`（fake-ip-range）。
+
+### 现成的回滚点
+
+- oxidns：`/etc/oxidns/config.yaml.bak-20260926-192239`
+- mihomo：`/etc/mihomo/config.yaml.bak-20260926-192503`
+- git：`1849551`（oxidns）/ mihomo 单独一条（见 `git log`）
+- dnsmasq：见偏差 1/2 的两条 `uci delete` / `del_list`
+
+---
+
 # 附录 A · mihomo 配置体检（对照官方示例 + qichiyuhub 模板）
 
 参考物：

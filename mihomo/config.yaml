@@ -48,6 +48,7 @@ skip-auth-prefixes:
 allow-lan: true
 bind-address: "*"
 ipv6: false
+find-process-mode: off   # 路由器上不需要进程匹配（官方 docs/config.yaml 建议 off）
 unified-delay: true
 tcp-concurrent: true
 log-level: warning
@@ -67,6 +68,8 @@ geox-url:
   mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
   geosite: https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat
   geoip: https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/geoip.dat
+geo-auto-update: true
+geo-update-interval: 24
 
 ntp:
   enable: true
@@ -106,36 +109,36 @@ dns:
   fake-ip-filter-mode: blacklist
   listen: 0.0.0.0:6666
   default-nameserver:
-    - 127.0.0.1:5337
+    - 127.0.0.1:5337        # oxidns 国内流水线（引导/节点解析）
   proxy-server-nameserver:
-    - 127.0.0.1:5337
+    - 127.0.0.1:5337        # oxidns 国内流水线（节点解析走国内）
   direct-nameserver:
-    - 127.0.0.1:5336
+    - 127.0.0.1:5336        # oxidns 混合流水线
   nameserver-policy:
-    "ruleset:inline":
-       - 127.0.0.1:5336
-    "ruleset:fakeipfilter_cn":
-       - 127.0.0.1:5336
+    "rule-set:inline":
+       - 127.0.0.1:5336        # 混合流水线：靠 oxidns hosts 命中，拿内网地址
+    "rule-set:fakeipfilter_cn":
+       - 127.0.0.1:5337        # 国内流水线
     "geosite:cn,private,steam@cn,microsoft@cn,apple@cn":
-       - 127.0.0.1:5336
-    "ruleset:fakeipfilter_!cn":
-       - 127.0.0.1:5336
+       - 127.0.0.1:5337        # 国内流水线（原来走混合链，白绕一跳）
+    "rule-set:fakeipfilter_!cn":
+       - 127.0.0.1:5336        # 混合流水线：这些国外域名必须拿真实 IP
   nameserver:
-    - 127.0.0.1:5336
+    - 127.0.0.1:5336        # oxidns 混合流水线
   fallback:
-    - 127.0.0.1:5336
+    - 127.0.0.1:5336        # oxidns 混合流水线
   fallback-filter:
     geoip: true
     geoip-code: CN
   fake-ip-filter:
-    - ruleset:fakeipfilter_cn
-    - ruleset:fakeipfilter_!cn
+    - rule-set:fakeipfilter_cn
+    - rule-set:fakeipfilter_!cn
     - geosite:private
     - geosite:cn
     - geosite:microsoft@cn
     - geosite:apple@cn
     - geosite:steam@cn
-    - ruleset:inline
+    - rule-set:inline
 
 
 proxy-groups:
@@ -211,5 +214,5 @@ rule-providers:
     type: inline
     behavior: domain
     payload:
-      - ".klchen.ducndns.org"
+      - ".klchen.duckdns.org"
 
