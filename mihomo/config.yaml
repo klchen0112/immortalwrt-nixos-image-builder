@@ -3,7 +3,9 @@
 # 因为DNS流程较多，尽可能用本地搭建DNS开启乐观缓存。
 # 因为配置里开启了绕过大陆，google商店会无法更新，可以尝试把 "+.googleapis.cn"  "+.xn--ngstr-lra8j.com" 两个域名后缀指定走国外DNS，同时rules里添加走代理，理论上可以解决，或者关闭绕过大陆。
 rule-anchor:
-  P: &P {type: http, interval: 0, health-check: {enable: true, url: 'https://www.gstatic.com/generate_204', interval: 300}, exclude-filter: "官网|剩余|流量|套餐|订阅|直连|到期时间|GB|Expire Date|Traffic|ExpireDate", proxy: 直连}
+  P: &P {type: http, interval: 86400, health-check: {enable: true, url: 'https://www.gstatic.com/generate_204', interval: 300}, exclude-filter: "官网|剩余|流量|套餐|订阅|直连|到期时间|GB|Expire Date|Traffic|ExpireDate", proxy: 直连}
+  # interval: 0 时订阅永不自动刷新（只有重启/手动 PUT 才更新）→ 用 86400（每天）
+  # proxy: 直连 是「拉订阅用的 egress」；被 ISP 挡的订阅必须单独改成走代理（见 proxy-providers）
   # 节点选择
   G1: &G1 {type: select, proxies: [默认代理, 香港故转, 日本故转, 台湾故转, 狮城故转, 美国故转, 香港手动, 日本手动, 台湾手动, 狮城手动, 美国手动, 香港自动, 日本自动, 台湾自动, 狮城自动, 美国自动, 全部自动, 全部手动, 直连]}
   S1: &S1 {type: select, proxies: [香港故转, 日本故转, 台湾故转, 狮城故转, 美国故转, 香港手动, 日本手动, 台湾手动, 狮城手动, 美国手动, 香港自动, 日本自动, 台湾自动, 狮城自动, 美国自动, 全部自动, 全部手动, 直连]}
@@ -31,8 +33,13 @@ rule-anchor:
   domain_text: &domain_text {type: http, interval: 86400, behavior: domain, format: text}
 
 proxy-providers:
-  cad: {<<: *P, url: "__SECRET_CAD_URL__"}
-  ikuu: {<<: *P, url: "__SECRET_IKUU_URL__"}
+  cad: {<<: *P, url: "__SECRET_CAD_URL__"}                                  # 直连可达（实测 200 / 0.48s）→ 保持 egress=直连
+  ikuu: {<<: *P, proxy: 默认代理, url: "__SECRET_IKUU_URL__"}                # 直连被 ISP 挡（实测 12s 超时 / 0 字节），egress 改走代理组
+  # 选组要点（实测 2026-09-26）：provider 的 proxy: 能用策略组名，但要挑对该 URL 真出得了网的组 ——
+  #   默认代理/香港故转/香港自动/GLOBAL 用 /proxies/<组>/delay?url=<订阅URL> 测都返回 delay（可用），
+  #   而「全部自动」「狮城自动」这类 URLTest+include-all 大组整体测试直接报错，换成它们照样拉不动。
+  # ⚠️ ikuu 走代理的前提是策略组里有活节点：给 cad 留 `proxy: 直连` 就是为了打破这个循环，
+  #    （全新设备/清空缓存时先靠 cad 直连拿到节点，ikuu 才拉得动）。
 
 proxies:
   - {name: 直连, type: direct, udp: true}
