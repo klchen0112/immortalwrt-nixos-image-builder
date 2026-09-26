@@ -177,6 +177,7 @@ dns:
 proxy-groups:
   - {name: 默认代理, <<: *S1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/select.png"}
   - {name: AI, type: select, proxies: [日本故转, 美国故转, 默认代理, 直连],default: 日本故转, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/ai.png"}
+  - {name: HF下载, <<: *SD, filter: "下载专用", icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/ai.png"}
   - {name: YouTube, <<: *S1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/youtube.png"}
   - {name: Google, <<: *S1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/google.png"}
   - {name: GitHub, <<: *S2, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/github.png"}
@@ -216,6 +217,7 @@ rules:
   - geoip,private,直连,no-resolve
   - geosite,private,直连
   - geosite,category-ai-!cn,AI
+  - DOMAIN-SUFFIX,huggingface.co,HF下载
   - geosite,youtube,YouTube
   - geosite,google,Google
   - geosite,github,GitHub
