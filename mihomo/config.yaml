@@ -63,12 +63,11 @@ secret: ""
 external-ui: ui
 external-ui-name: zashboard
 external-ui-url: "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
-
 geox-url:
-  mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
+  # mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
   geosite: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat   # 与 oxidns 共用 /etc/mihomo/GeoSite.dat（MetaCubeX 版，4.3M）
   geoip: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat   # 与 oxidns 共用 /etc/mihomo/geoip.dat（v2ray 格式；只有 meta 这套含 google/netflix 等分类码）
-geo-auto-update: true
+geo-auto-update: false
 geo-update-interval: 24
 geodata-mode: true        # geoip 规则读 /etc/mihomo/geoip.dat（与 oxidns 共用同一份；false 则用 country.mmdb）
 
@@ -100,6 +99,24 @@ sniffer:
     - "Mijia Cloud"
     - "+.push.apple.com"
 
+# ============================================================================
+# DNS 上游锚点 —— dns: 段里统一用 *direct-dns / *global-dns 引用
+#   两条链目前都指 oxidns 混合流水线 :5336（国内域名→国内上游真实 IP，
+#   非国内→Cloudflare/Google DoH 真实 IP，且带 oxidns hosts 内网映射）。
+#   换上游只改这里一处，nameserver / fallback / nameserver-policy 全部跟着变。
+#   ⚠️ 别把 direct-dns 换成 :5337（纯国内链）：cn_pipeline 里没有 $hosts，且对国外域名
+#      只会返回被污染的国内答案 —— inline（内网域名）和 fakeipfilter_!cn 会一起坏掉。
+# ============================================================================
+dns-anchor:
+  # 国内 DNS 列表锚点
+  direct-dns: &direct-dns
+    - 127.0.0.1:5336        # oxidns 混合流水线（国内优先 → 真实 IP）
+    # - 223.5.5.5           # 兜底：oxidns 不可用时临时解注释（会绕过 ECS/hosts）
+  # 国外 DNS 列表锚点
+  global-dns: &global-dns
+    - 127.0.0.1:5336        # oxidns 混合流水线（非国内 → 国外 DoH 真实 IP）
+    # - https://1.1.1.1/dns-query   # 兜底同上（由 mihomo 走代理出去）
+
 dns:
   enable: true
   cache-algorithm: arc
@@ -109,25 +126,16 @@ dns:
   fake-ip-range: 28.0.0.0/16
   fake-ip-filter-mode: blacklist
   listen: 0.0.0.0:6666
-  default-nameserver:
-    - 127.0.0.1:5337        # oxidns 国内流水线（引导/节点解析）
-  proxy-server-nameserver:
-    - 127.0.0.1:5337        # oxidns 国内流水线（节点解析走国内）
-  direct-nameserver:
-    - 127.0.0.1:5336        # oxidns 混合流水线
+  default-nameserver: *direct-dns          # 引导用：只解析 DNS 服务器地址（必须纯 IP）
+  proxy-server-nameserver: *direct-dns     # 节点域名解析
+  direct-nameserver: *direct-dns           # 走直连的域名
   nameserver-policy:
-    "rule-set:inline":
-       - 127.0.0.1:5336        # 混合流水线：靠 oxidns hosts 命中，拿内网地址
-    "rule-set:fakeipfilter_cn":
-       - 127.0.0.1:5337        # 国内流水线
-    "geosite:cn,private,steam@cn,microsoft@cn,apple@cn":
-       - 127.0.0.1:5337        # 国内流水线（原来走混合链，白绕一跳）
-    "rule-set:fakeipfilter_!cn":
-       - 127.0.0.1:5336        # 混合流水线：这些国外域名必须拿真实 IP
-  nameserver:
-    - 127.0.0.1:5336        # oxidns 混合流水线
-  fallback:
-    - 127.0.0.1:5336        # oxidns 混合流水线
+    "rule-set:inline": *direct-dns           # 靠 oxidns hosts 命中，拿内网地址（必须在混合链上）
+    "rule-set:fakeipfilter_cn": *direct-dns  # 国内域名：拿真实 IP
+    "geosite:cn,private,steam@cn,microsoft@cn,apple@cn": *direct-dns
+    "rule-set:fakeipfilter_!cn": *global-dns # 这些国外域名必须拿真实 IP
+  nameserver: *global-dns                  # 默认链
+  fallback: *global-dns
   fallback-filter:
     geoip: true
     geoip-code: CN
@@ -135,7 +143,9 @@ dns:
     - rule-set:fakeipfilter_cn
     - rule-set:fakeipfilter_!cn
     - geosite:private
-    - geosite:cn
+    # 不要放 geosite:cn —— oxidns :5335 已经按 geosite_cn 决定「国内→真实 IP」，这里再拦一次会把
+    # oxidns force_noncn 名单里的域名（pterclub.com 等）反向覆盖成真实 IP（实测 2026-09-26）。
+    # MetaCubeX 的 cn 名单会收录这类站点，Loyalsoldier 版不会 —— 换名单时必须复核这条。
     - geosite:microsoft@cn
     - geosite:apple@cn
     - geosite:steam@cn
