@@ -216,8 +216,8 @@ rules:
   - AND,((geosite,geolocation-!cn),(DST-PORT,443),(NETWORK,UDP)),REJECT
   - geoip,private,直连,no-resolve
   - geosite,private,直连
-  - geosite,category-ai-!cn,AI
   - DOMAIN-SUFFIX,huggingface.co,HF下载
+  - geosite,category-ai-!cn,AI
   - geosite,youtube,YouTube
   - geosite,google,Google
   - geosite,github,GitHub
