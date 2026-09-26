@@ -53,6 +53,7 @@ proxies:
   - name: TS
     type: tailscale
     hostname: cudy-tr3000
+    auth-key: "__SECRET_TS_AUTHKEY__"   # 真值放 .secrets/tailscale.env（不进仓库）；留空=回退交互式登录 URL
     state-dir: ./tailscale        # → /etc/mihomo/tailscale（必须在工作目录内，否则 IsSafePath 直接拒绝）
     udp: true
     accept-routes: true

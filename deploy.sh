@@ -24,6 +24,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 W="${ROUTER:-192.168.10.1}"
 SECRETS="$REPO/.secrets/mihomo-providers.env"
+SECRETS_TS="$REPO/.secrets/tailscale.env"   # 可选：TS_AUTHKEY=tskey-auth-…（没有就回退交互式登录）
 SSH=(ssh -o BatchMode=yes "root@$W")
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
@@ -34,9 +35,20 @@ render_mihomo() {   # 占位符 → 真实值，结果写到 stdout
   # shellcheck disable=SC1090
   set -a; . "$SECRETS"; set +a
   [ -n "${PROVIDER_CAD_URL:-}" ] && [ -n "${PROVIDER_IKUU_URL:-}" ] || die "$SECRETS 里缺少 PROVIDER_*_URL"
+  # Tailscale auth key 是可选的：没有就渲染成空串 → mihomo/tsnet 回退交互式登录 URL
+  local ts_key=""
+  if [ -f "$SECRETS_TS" ]; then
+    # shellcheck disable=SC1090
+    set -a; . "$SECRETS_TS"; set +a
+    ts_key="${TS_AUTHKEY:-}"
+    [ -n "$ts_key" ] || printf '!! %s 里没有 TS_AUTHKEY → Tailscale 走交互式登录\n' "$SECRETS_TS" >&2
+  else
+    printf '!! 没有 %s → Tailscale 走交互式登录（登录 URL 在 mihomo 日志里）\n' "$SECRETS_TS" >&2
+  fi
   local out; out="$(mktemp)"
   sed -e "s|__SECRET_CAD_URL__|${PROVIDER_CAD_URL}|" \
       -e "s|__SECRET_IKUU_URL__|${PROVIDER_IKUU_URL}|" \
+      -e "s|__SECRET_TS_AUTHKEY__|${ts_key}|" \
       "$REPO/mihomo/config.yaml" > "$out"
   if grep -q '__SECRET_' "$out"; then rm -f "$out"; die "渲染后仍有未替换的占位符（仓库里新增了占位符？）"; fi
   cat "$out"; rm -f "$out"
