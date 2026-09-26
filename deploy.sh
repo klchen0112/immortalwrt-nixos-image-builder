@@ -7,6 +7,9 @@
 #   所以跟踪文件里只有 __SECRET_CAD_URL__ / __SECRET_IKUU_URL__ 占位符，
 #   真实值放在 .secrets/mihomo-providers.env（.gitignore，chmod 600）。
 #   本脚本在本地把占位符渲染成真实值，再推给路由器。
+# 同时部署 mihomo/nftables-ip46.conf（透明代理目标集合：28/8 fake-ip、DNS、Telegram、
+#   192.168.0.0/24 走 Tailscale 等）——它由 /etc/init.d/mihomo 在启动后用 `nft -f` 加载，
+#   所以 nft 的改动要等 mihomo 重启才生效。
 #
 # 用法：
 #   ./deploy.sh mihomo          # 渲染 + dry-run 校验 + 备份 + 部署 + 重启
@@ -52,6 +55,12 @@ deploy_mihomo() {
   "${SSH[@]}" 'cat > /etc/mihomo/config.yaml' < "$tmp"
   "${SSH[@]}" 'chmod 600 /etc/mihomo/config.yaml'
   rm -f "$tmp"
+  say "部署 nftables 规则集（透明代理目标集合；重启 mihomo 时由 init 脚本重载）"
+  "${SSH[@]}" 'cat > /tmp/nft.candidate.conf' < "$REPO/mihomo/nftables-ip46.conf"
+  "${SSH[@]}" 'nft -c -f /tmp/nft.candidate.conf' || die "nft 语法校验失败，未部署 nft"
+  backup_remote /etc/mihomo/nftables-ip46.conf
+  "${SSH[@]}" 'cat > /etc/mihomo/nftables-ip46.conf' < "$REPO/mihomo/nftables-ip46.conf"
+  "${SSH[@]}" 'chmod 644 /etc/mihomo/nftables-ip46.conf'
   local l r
   l="$(md5sum "$REPO/mihomo/config.yaml" | cut -d' ' -f1)"   # 占位符版本（仅用于提示）
   r="$("${SSH[@]}" 'md5sum /etc/mihomo/config.yaml' | cut -d' ' -f1)"

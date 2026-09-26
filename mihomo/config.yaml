@@ -43,6 +43,20 @@ proxy-providers:
 
 proxies:
   - {name: 直连, type: direct, udp: true}
+  # Tailscale 出站节点（家里 LAN 走它）：
+  #   - mihomo 的 tailscale 只有出站能力（没有入站 listener，也没有 advertise-routes）；
+  #     `accept-routes: true` = 接收 tailnet 里发布的 subnet routes（家里那台 advertise 的 192.168.0.0/24），
+  #     再由 rules 第一行 `IP-CIDR,192.168.0.0/24,TS,no-resolve` 把去家里的流量指过来。
+  #   - 懒加载：只有第一次「命中」才初始化（不随 mihomo 启动）→ 首次访问家里超时是正常的，多试几次。
+  #   - 没填 auth-key → 首次初始化时 tsnet 会打印交互式登录 URL（UserLogf=info 级，
+  #     所以 log-level 必须是 info 才看得到）；登录态存在 state-dir 里，重启不丢。
+  - name: TS
+    type: tailscale
+    hostname: a99r50-router
+    state-dir: ./tailscale        # → /etc/mihomo/tailscale（必须在工作目录内，否则 IsSafePath 直接拒绝）
+    udp: true
+    accept-routes: true
+    dialer-proxy: 默认代理         # 控制面/DERP 走代理（国内直连不稳）；若直连能通可删掉这行
 
 mixed-port: 7890
 tproxy-port: 7895
@@ -58,7 +72,7 @@ ipv6: false
 find-process-mode: off   # 路由器上不需要进程匹配（官方 docs/config.yaml 建议 off）
 unified-delay: true
 tcp-concurrent: true
-log-level: warning
+log-level: info    # 临时：Tailscale 无 auth-key 时首次初始化要 info 级才看得到交互式登录 URL（登录完改回 warning）
 keep-alive-idle: 600
 keep-alive-interval: 15
 profile:
@@ -196,6 +210,7 @@ proxy-groups:
   - {name: GLOBAL, <<: *G1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/all.png"}
 
 rules:
+  - IP-CIDR,192.168.0.0/24,TS,no-resolve   # 家里 LAN（192.168.0.10/24）走 Tailscale；必须在 geoip,private,直连 之前
   - AND,((geosite,geolocation-!cn),(DST-PORT,443),(NETWORK,UDP)),REJECT
   - geoip,private,直连,no-resolve
   - geosite,private,直连
