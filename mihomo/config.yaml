@@ -73,7 +73,7 @@ ipv6: false
 find-process-mode: off   # 路由器上不需要进程匹配（官方 docs/config.yaml 建议 off）
 unified-delay: true
 tcp-concurrent: true
-log-level: info    # 临时：Tailscale 无 auth-key 时首次初始化要 info 级才看得到交互式登录 URL（登录完改回 warning）
+log-level: warning
 keep-alive-idle: 600
 keep-alive-interval: 15
 profile:
