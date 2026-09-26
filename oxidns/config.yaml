@@ -1,0 +1,372 @@
+# ============================================================================
+# OxiDNS：三条独立解析流水线
+#   流水线 1 国内   cn_pipeline       入口 :5337   只问国内上游 → 真实 IP
+#   流水线 2 国外   foreign_pipeline  无独立端口    → fake-ip（映射由 mihomo :6666 生成）
+#   流水线 3 默认   default_pipeline  入口 :5335   国内名单→国内链；其余(含漏网之鱼)→国外链
+#   辅助链   混合   mixed_pipeline    入口 :5336   国内优先，非国内再走国外真实 IP（mihomo 自己用）
+# working-dir = /var/lib/oxidns（/etc/init.d/oxidns 传 -d），所有 ./ 路径都相对它
+# ============================================================================
+log:
+  level: error
+
+api:
+  http:
+    listen: "192.168.10.1:9199"
+    auth:
+      type: basic
+      username: "admin"
+      password: "secret"
+    webui:
+      root: "/usr/share/oxidns/webui/"
+      index: "index.html"
+
+plugins:
+  # ------------------------------------------------------------------
+  # 订阅刷新：规则文件全部落在 <working-dir>/rules/
+  # ------------------------------------------------------------------
+  - tag: subscription_cron
+    type: cron
+    args:
+      timezone: Asia/Shanghai
+      jobs:
+        - name: refresh_rule_subscriptions
+          interval: 24h
+          executors:
+            - $subscription_refresh
+
+  - tag: subscription_refresh
+    type: sequence
+    args:
+      - exec: $subscription_download
+      - exec: $reload_rule_providers
+
+  - tag: subscription_download
+    type: download
+    args:
+      timeout: 60s
+      startup_if_missing: true
+      downloads:
+        - url: https://anti-ad.net/adguard.txt
+          dir: ./rules
+          filename: adguard.txt
+        - url: https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat
+          dir: ./rules
+          filename: geosite.dat
+        - url: https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/geoip-only-cn-private.dat
+          dir: ./rules
+          filename: geoip.dat
+
+  # ------------------------------------------------------------------
+  # provider（规则集）
+  # ------------------------------------------------------------------
+  - tag: ad_rules
+    type: adguard_rule
+    args:
+      files:
+        - ./rules/adguard.txt
+
+  - tag: geoip_cn
+    type: geoip
+    args:
+      file: ./rules/geoip.dat
+      selectors:
+        - cn
+
+  - tag: geosite_cn
+    type: geosite
+    args:
+      file: ./rules/geosite.dat
+      selectors:
+        - cn
+        - apple@cn
+        - google@cn
+        - category-games@cn
+        - category-game-platforms-download
+
+  - tag: category_ads_all
+    type: geosite
+    args:
+      file: ./rules/geosite.dat
+      selectors:
+        - category-ads-all
+        - win-spy
+        - win-extra
+
+  - tag: hosts
+    type: hosts
+    args:
+      entries:
+        - domain:a99r50.klchen.duckdns.org 192.168.10.248
+        - domain:a2700.klchen.duckdns.org 192.168.0.197
+        - domain:sanjiao.klchen.duckdns.org 192.168.0.198
+        - domain:i12400.klchen.duckdns.org 192.168.0.199
+        - domain:klchen.duckdns.org 192.168.0.210
+
+  - tag: ecscn
+    type: domain_set
+    args:
+      exps:
+        - tv.micu.hk
+        - tv1.micu.hk
+        - v0.micu.hk
+        - v1.micu.hk
+        - v2.micu.hk
+
+  - tag: force_noncn
+    type: domain_set
+    args:
+      exps:
+        - domain:pterclub.com
+        - domain:dl.google.com
+        - domain:u2.dmhy.org
+        - domain:gstatic.com
+        - domain:cachix.org
+        - domain:nix-community.cachix.org
+        - domain:cache.numtide.com
+
+  - tag: local_ptr
+    type: domain_set
+    args:
+      exps:
+        - 168.192.in-addr.arpa.
+        - 16.172.in-addr.arpa.
+        - 10.in-addr.arpa.
+
+  - tag: reload_rule_providers
+    type: reload_provider
+    args:
+      - $geoip_cn
+      - $geosite_cn
+      - $category_ads_all
+      - $ad_rules
+
+  # ------------------------------------------------------------------
+  # 上游
+  # ------------------------------------------------------------------
+  - tag: cn_dns
+    type: forward
+    args:
+      concurrent: 3
+      upstreams:
+        - addr: "https://dns.alidns.com/dns-query"
+          dial_addr: "223.5.5.5"
+          enable_pipeline: true
+          enable_http3: true
+        - addr: "https://dns.alidns.com/dns-query"
+          dial_addr: "223.6.6.6"
+          enable_pipeline: true
+          enable_http3: true
+        - addr: "https://dns.pub/dns-query"
+          dial_addr: "119.29.29.29"
+
+  - tag: google
+    type: forward
+    args:
+      concurrent: 2
+      upstreams:
+        - addr: "https://dns.google/dns-query"
+          dial_addr: "8.8.8.8"
+          enable_pipeline: true
+          socks5: "127.0.0.1:7890"
+        - addr: "https://dns.google/dns-query"
+          dial_addr: "8.8.4.4"
+          enable_pipeline: true
+          socks5: "127.0.0.1:7890"
+
+  - tag: cloudflare
+    type: forward
+    args:
+      concurrent: 2
+      upstreams:
+        - addr: "https://cloudflare-dns.com/dns-query"
+          dial_addr: "1.1.1.1"
+          enable_pipeline: true
+          socks5: "127.0.0.1:7890"
+        - addr: "https://cloudflare-dns.com/dns-query"
+          dial_addr: "1.0.0.1"
+          enable_pipeline: true
+          socks5: "127.0.0.1:7890"
+
+  - tag: forward_remote
+    type: fallback
+    args:
+      primary: cloudflare
+      secondary: google
+      threshold: 500
+      always_standby: true
+
+  - tag: fakeip
+    type: forward
+    args:
+      concurrent: 1
+      upstreams:
+        - addr: "udp://127.0.0.1:6666"
+
+  # ------------------------------------------------------------------
+  # 缓存 / 观测 / 防护
+  # ------------------------------------------------------------------
+  - tag: cache_cn
+    type: cache
+    args:
+      size: 16384
+      lazy_cache_ttl: 86400
+      dump_file: ./rules/dns_cache.dump
+      dump_interval: 3600
+
+  - tag: query_recorder_main
+    type: query_recorder
+    args:
+      path: ./rules/query-recorder-main.sqlite
+      queue_size: 8192
+      batch_size: 256
+      flush_interval_ms: 200
+      memory_tail: 1024
+      retention_days: 3
+      cleanup_interval_hours: 1
+
+  - tag: rate_limit
+    type: rate_limiter
+    args:
+      qps: 200
+      burst: 400
+      mask4: 32
+      mask6: 48
+
+  - tag: ad_blackhole
+    type: black_hole
+    args:
+      ips:
+        - 0.0.0.0
+        - "::"
+      short_circuit: true
+
+  - tag: block_seq
+    type: sequence
+    args:
+      - matches: qtype 65 255
+        exec: reject 0
+      - matches: qname $category_ads_all
+        exec: $ad_blackhole
+      - matches: qname $ad_rules
+        exec: $ad_blackhole
+      - matches: qname $local_ptr
+        exec: reject 3
+
+  - tag: ecs_cn
+    type: ecs_handler
+    args:
+      forward: false
+      preset: 123.116.100.114
+      send: false
+      mask4: 24
+      mask6: 48
+
+  - tag: no_ecs
+    type: ecs_handler
+    args:
+      forward: false
+      preset: ""
+      send: false
+      mask4: 24
+      mask6: 48
+
+  # ==================================================================
+  # 流水线
+  # ==================================================================
+  # 流水线 1 · 国内：只问国内上游，返回真实 IP
+  - tag: cn_pipeline
+    type: sequence
+    args:
+      - exec: $cache_cn
+      - matches: has_resp
+        exec: accept
+      - matches: qname $ecscn
+        exec: $ecs_cn
+      - exec: $cn_dns
+      - matches: has_resp
+        exec: accept
+
+  # 流水线 2 · 国外：返回 fake-ip
+  - tag: foreign_pipeline
+    type: sequence
+    args:
+      - exec: drop_resp
+      - exec: $fakeip
+      - matches: has_resp
+        exec: accept
+
+  # 流水线 3 · 默认：国内名单→国内链；其余（含漏网之鱼）→国外链 fake-ip
+  - tag: default_pipeline
+    type: sequence
+    args:
+      - exec: $query_recorder_main
+      - matches: "!$rate_limit"
+        exec: reject 3
+      - exec: $hosts
+      - matches: has_resp
+        exec: accept
+      - exec: jump block_seq
+      - matches: qname $force_noncn
+        exec: $foreign_pipeline
+      - matches: has_resp
+        exec: accept
+      - matches: qname $geosite_cn
+        exec: $cn_pipeline
+      - matches: has_resp
+        exec: accept
+      - exec: $foreign_pipeline
+      - matches: has_resp
+        exec: accept
+
+  # 辅助链 · 混合：国内优先，非国内走国外真实 IP（给 mihomo 自己解析用）
+  # 注意：这里用 resp_ip $geoip_cn 而不是 has_resp 收口 —— 国内 DNS 对国外域名会返回
+  # 被污染的答案（实测 www.google.com → 69.171.235.22），只有答案真的落在 CN 才认，
+  # 否则继续往下问国外 DoH（fallback 失败时仍返回国内答案兜底）。
+  - tag: mixed_pipeline
+    type: sequence
+    args:
+      - exec: $hosts
+      - matches: has_resp
+        exec: accept
+      - exec: $cn_dns
+      - matches: resp_ip $geoip_cn
+        exec: accept
+      - exec: $no_ecs
+      - exec: prefer_ipv4
+      - exec: $forward_remote
+      - matches: has_resp
+        exec: accept
+
+  # ==================================================================
+  # 入口
+  # ==================================================================
+  - tag: udp_server_5335
+    type: udp_server
+    args:
+      entry: default_pipeline
+      listen: ":5335"
+  - tag: tcp_server_5335
+    type: tcp_server
+    args:
+      entry: default_pipeline
+      listen: ":5335"
+  - tag: udp_server_5336
+    type: udp_server
+    args:
+      entry: mixed_pipeline
+      listen: ":5336"
+  - tag: tcp_server_5336
+    type: tcp_server
+    args:
+      entry: mixed_pipeline
+      listen: ":5336"
+  - tag: udp_server_5337
+    type: udp_server
+    args:
+      entry: cn_pipeline
+      listen: ":5337"
+  - tag: tcp_server_5337
+    type: tcp_server
+    args:
+      entry: cn_pipeline
+      listen: ":5337"
