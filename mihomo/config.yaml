@@ -237,7 +237,6 @@ rules:
   - geosite,steam,Steam
   - geosite,geolocation-!cn,默认代理
   - geoip,google,Google
-  - RULE-SET,apple_ip,Apple   # apple 分类码只在 geo-lite/mrs 里，v2ray geoip.dat 没有
   - geoip,telegram,Telegram
   - geoip,netflix,NETFLIX
   - geoip,cn,直连
@@ -246,7 +245,6 @@ rules:
 rule-providers:
   fakeipfilter_cn: {<<: *domain_text, url: "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-cn.list"}
   fakeipfilter_!cn: {<<: *domain_text, url: "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-!cn.list"}
-  apple_ip: {<<: *ip, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/refs/heads/meta/geo-lite/geoip/apple.mrs"}
   inline:
     type: inline
     behavior: domain
