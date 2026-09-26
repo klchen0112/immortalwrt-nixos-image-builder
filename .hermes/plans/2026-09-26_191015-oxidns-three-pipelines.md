@@ -916,15 +916,22 @@ dnsmasq 全程不动（`:53` → `127.0.0.1#5335` 不变），所以回滚只涉
 | A1 前后对比 | `detectportal.firefox.com` 28.0.0.161→`151.101.129.91`、`pool.ntp.org` 28.0.0.164→`119.28.206.193`、`network-test.debian.org` 28.0.0.163→`151.101.2.132`、`resolver1.opendns.com`→`208.67.222.222`；对照组 `www.google.com` 仍 `28.0.0.12` |
 | git | `1849551` oxidns 三流水线；mihomo 改动单独一条 commit |
 
-### 偏差 1（计划假设错误，必须修）：dnsmasq 其实**从来没在用** oxidns
+### 偏差 1（**诊断已修正**，结论仍成立但原因不同）：dnsmasq 会用 oxidns，只是窗口期会静默回落 ISP
 
-计划里写「dnsmasq 全程不动」，因为它 `server=127.0.0.1#5335`。实测：dnsmasq 同时还吃 `resolv-file=/tmp/resolv.conf.d/resolv.conf.auto`（→ 192.168.6.1），**5/5 次都挑了 ISP**，于是 LAN 拿到被污染的真实 IP（`www.google.com` → `69.171.235.22`）而不是 fake-ip，google/github 的 curl 直接超时。
+初判「dnsmasq 从来没在用 oxidns」是**错的**，用户质疑后用 A/B 自证：摘掉 `noresolv`（= 原配置）再测，`www.google.com` 5/5 得到 `28.0.0.12` —— dnsmasq 平时确实走 `127.0.0.1#5335`。
+
+真正的坑是**窗口期**：oxidns 冷启动要 ~15s 加载 geosite(11M)+adguard(2M) 才监听 5335；窗口内 dnsmasq 打 5335 无人应答 → 回落 `resolv-file` 的 192.168.6.1，并在一段时间内继续用 ISP（dnsmasq 记住"最近可用"的上游）。症状=LAN 拿到被污染的真实 IP（`www.google.com` → `69.171.235.22`）、无 fake-ip、google/github 的 curl 超时。我最初 5/5 测到污染，正是因为测试落在刚重启 oxidns 后的加载窗口里（同一天早上 oxidns 还在 crash loop，dnsmasq 早把 ISP 记成可用）。
+
+`noresolv=1` 的代价也实测了：重启 oxidns 期间 LAN DNS 约 **6–8s 无应答**（`t+0/2/4s timed out`，`t+8s` 恢复 `28.0.0.12`）。所以这是「确定性 vs 兜底」的取舍，不是"修了一个从来没生效的配置" —— 是否保留由用户定（选项见下）。
 
 ```bash
+# 保留确定性（当前状态）
 ssh root@192.168.10.1 'uci set dhcp.@dnsmasq[0].noresolv="1"; uci commit dhcp; /etc/init.d/dnsmasq restart'
+# 恢复原状的兜底行为
+ssh root@192.168.10.1 'uci delete dhcp.@dnsmasq[0].noresolv; uci commit dhcp; /etc/init.d/dnsmasq restart'
 ```
-改后：`:53` → google `28.0.0.12`（fake-ip ✓）、baidu `36.152.44.93` ✓、doubleclick `0.0.0.0` ✓、curl 全 200。
-**回滚**：`uci delete dhcp.@dnsmasq[0].noresolv; uci commit dhcp; /etc/init.d/dnsmasq restart`。（副作用：oxidns 挂掉时 LAN 没有 ISP 兜底——这正是 fake-ip 设计的必要代价。）
+
+改后（noresolv 生效）：`:53` → google `28.0.0.12`（fake-ip ✓）、baidu `36.152.44.93` ✓、doubleclick `0.0.0.0` ✓、curl 全 200。
 
 ### 偏差 2（同上连带发现）：`hosts` 内网映射被 dnsmasq 的 rebind 保护吞掉
 
