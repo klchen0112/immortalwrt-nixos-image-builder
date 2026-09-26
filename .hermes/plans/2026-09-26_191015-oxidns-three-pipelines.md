@@ -968,6 +968,53 @@ ssh root@192.168.10.1 'uci add_list dhcp.@dnsmasq[0].rebind_domain="klchen.duckd
 
 ---
 
+# 执行记录 2（2026-09-26 19:44–20:20 CST）：geosite/geoip 与 mihomo 共享 + 广告改走 geosite + 密钥出仓
+
+## 做了什么（每条都有实测证据）
+
+| 项 | 改动 | 证据 |
+|---|---|---|
+| **共享 geosite** | `/etc/mihomo/GeoSite.dat` = **MetaCubeX** `meta-rules-dat@release/geosite.dat`（4,253,127 B，md5 `64595a7802d9…`）；mihomo `geox-url.geosite` 与 oxidns `geosite_cn` / `category_ads_all` 读同一份 | `export-dat` 覆盖全部 selector：cn 111,275 / apple@cn 297 / google@cn 127 / category-games@cn 41 / category-game-platforms-download 493 / category-ads-all 912 / win-spy 328 / win-extra 356 / private 132 / steam@cn 20 / microsoft@cn 190 / apple 1,793 |
+| **共享 geoip** | `/etc/mihomo/geoip.dat` = MetaCubeX `geoip.dat`（16,635,240 B，md5 `4e5cbbae8ca8…`）；mihomo 开 `geodata-mode: true` 走它，oxidns `geoip_cn` 也走它 | dry-run 日志：GeoIP rule cn 9,612 / private 18 / google 8,403 / telegram 12 / netflix 120 全部来自 dat；删掉 `geoip.metadb` 后重启**不再生成** metadb，0 错误 |
+| **广告不再单独下 adguard.txt** | 删除 `ad_rules`(adguard_rule) provider、`subscription_download` 里的 adguard 项、`reload_rule_providers` 里的引用 → 广告只由 geosite `category-ads-all` + `win-spy` + `win-extra` 承担 | `--graph` 里 `block_seq` → `qname $category_ads_all`；plugins 36→34 |
+| **删冗余 dat** | 删 `/etc/mihomo/GeoIP.dat`、`/etc/mihomo/rules/{geoip.dat,geoip.metadb,geosite.dat,GeoSite.dat}`、`/var/lib/oxidns/rules/{adguard.txt,geosite.dat,geoip.dat,gfw_ip.txt}` | `/etc/mihomo` **101.6M → 32.8M**；overlay **73.0M → 55.8M（43% → 33%）** |
+| **密钥出仓** | `mihomo/config.yaml` 的 `proxy-providers` 两个订阅 URL → `__SECRET_CAD_URL__` / `__SECRET_IKUU_URL__`；真值在 `.secrets/mihomo-providers.env`（`.gitignore` + chmod 600）；新增 `deploy.sh`（渲染 → mihomo dry-run 门禁 → 备份 → 推送 → 重启） | live 配置 `grep -c __SECRET_` = 0 且订阅节点（`andada-*`/`🇭🇰 香港 A01` …）已加载；本地跟踪文件明文命中 0 |
+| **git 历史抹除** | `git filter-branch --tree-filter` 把历史里的 URL 明文替换成同一套占位符，然后 `reflog expire` + `gc --prune=now` | 见下「历史校验」 |
+
+## 踩到的坑（必须记住，已回写 skill）
+
+1. **`geodata-mode: true` 会要求 geoip.dat 覆盖规则里所有 code，否则 mihomo 启动即 fatal。**
+   直接开 `geodata-mode: true` 后：`rules[22] [geoip,apple,Apple] error: [GeoIP] failed to decode geodata file: geoip.dat, base error: country code apple not found in geoip.dat` → **mihomo 起不来，LAN 断网**。
+   根因：`apple`/`google` 这类**分类码**只在 MetaCubeX 的 mmdb 与 `geo-lite/*.mrs` 里有；**v2ray 格式的 geoip.dat（Loyalsoldier 全套、MetaCubeX 的 release 版）都没有 `apple`**（MetaCubeX 版有 google/telegram/netflix/cloudflare，仍缺 apple）。
+   解法：`- geoip,apple,Apple` → `- RULE-SET,apple_ip,Apple` + `rule-providers.apple_ip`（`meta/geo-lite/geoip/apple.mrs`，10 条 CIDR = `17.0.0.0/8` + 几个 Apple 自有段，与 mmdb 里那份同源）。
+   **纪律**：改 mihomo 配置一律先 `mihomo -t -f <候选> -d /etc/mihomo` 再动 live（本次就是这样才发现候选配置不合法）。
+2. **oxidns 的 `cron` 不能用 `schedule:`（只要写了 `timezone:` 就必崩）。**
+   插件把 `schedule` 与 `timezone` 拼成 `'0 5 * * 0 Asia/Shanghai'` 交给 cron 解析 → `failed to find timezone Asia/Shanghai` → `Plugin initialization failed` → **oxidns 起不来（DNS 全断）**。`interval:` 形式的任务是安全的。已改 `interval: 168h`。
+3. **`download` 的 `dir` 必须和 provider 的 `file` 指向同一处**（旧坑复现一次）：中间态把共享 geodata 下到 `/etc/mihomo/rules/` 而 provider 读 `/etc/mihomo/` → `failed to open '/etc/mihomo/GeoSite.dat'`。
+
+## 历史校验（密钥抹除）
+
+```bash
+git -C /home/klchen/im-nixos log --oneline                     # 4 条 commit 全部被重写（hash 变）
+# 指纹从 .secrets 现取（文档里不留订阅域名原文），并对 **token 段**单独扫一遍
+. /home/klchen/im-nixos/.secrets/mihomo-providers.env
+host=$(printf '%s\n%s\n' "$PROVIDER_CAD_URL" "$PROVIDER_IKUU_URL" | sed -E 's#https?://([^/]+).*#\1#' | paste -sd'|')
+tok=$(printf '%s\n%s\n' "$PROVIDER_CAD_URL" "$PROVIDER_IKUU_URL" | sed -E 's#https?://[^/]+/([^/?]{8,8}).*#\1#' | paste -sd'|')
+git -C /home/klchen/im-nixos cat-file --batch-all-objects --batch | grep -aEc "$host"   # 期望 0（域名）
+git -C /home/klchen/im-nixos cat-file --batch-all-objects --batch | grep -aEc "$tok"    # 期望 0（token 前 8 位）
+```
+另：调试用的副本 `/home/klchen/.local/share/hermes/.hermes/cache/scratch/mihomo-issue/router-config.yaml` 也已就地脱敏（含备份已删）。
+**注意**：本仓库（`im-nixos`）**没有 remote**（`git remote -v` 为空），所以抹历史是纯本地操作；将来若要推到公开仓库，先确认这份历史已经干净。
+
+## 已知副作用 / 待你拍板
+
+1. **广告拦截面变小**：`category-ads-all` 从 Loyalsoldier 的 **192,056 条**降到 MetaCubeX 的 **912 条** → `oxidns/probe.sh:19` 断言的 `doubleclick.net → 0.0.0.0` **现在会 FAIL**（实测返回真实 IP；`ads.doubleclick.net`/`tracker.adsafeprotected.com` 仍被 sinkhole）。三个选项：(a) 接受，并把 probe.sh 的广告断言换成 meta 名单里确实有的域名；(b) 广告另挂一份大清单（`anti-ad.net/adguard.txt`，约 2.2M，落在 `/var/lib/oxidns/rules/`，与「只用 geosite」的初衷相反）；(c) 广告继续用 Loyalsoldier 的 geosite（多 11.1M）。
+2. **oxidns 内存**：RSS 从 ~90–142M 降到 **28.8M**（geosite 4.3M 版 + 广告集变小）；启动加载时间同步变短，dnsmasq 冷启动窗口期更不容易回落 ISP。
+3. **仍未做**：附录 A 的 `A2`（`secret: ""` 控制面裸奔）、`A3`（`authentication: user:passwd` 占位符）、`A4`（`:6666` 收紧 loopback）、`A8`(sniffer)、`A9`(订阅 `interval: 0`)、`A10`(ui URL)、`A11`(fake-ip-range)。其中 A2/A3 建议与本次的 `.secrets` 机制合并处理（把 `secret` 也放进 `.secrets`，由 `deploy.sh` 注入）。
+4. **`proxy-providers.interval: 0`**（A9）在密钥出仓后依然存在：订阅永不自动刷新，需手动 `deploy.sh` 或改 `86400`。
+
+---
+
 # 附录 A · mihomo 配置体检（对照官方示例 + qichiyuhub 模板）
 
 参考物：

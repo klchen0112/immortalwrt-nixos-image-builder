@@ -66,10 +66,11 @@ external-ui-url: "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-p
 
 geox-url:
   mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
-  geosite: https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat
-  geoip: https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/geoip.dat
+  geosite: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat   # 与 oxidns 共用 /etc/mihomo/GeoSite.dat（MetaCubeX 版，4.3M）
+  geoip: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat   # 与 oxidns 共用 /etc/mihomo/geoip.dat（v2ray 格式；只有 meta 这套含 google/netflix 等分类码）
 geo-auto-update: true
 geo-update-interval: 24
+geodata-mode: true        # geoip 规则读 /etc/mihomo/geoip.dat（与 oxidns 共用同一份；false 则用 country.mmdb）
 
 ntp:
   enable: true
@@ -201,7 +202,7 @@ rules:
   - geosite,steam,Steam
   - geosite,geolocation-!cn,默认代理
   - geoip,google,Google
-  - geoip,apple,Apple
+  - RULE-SET,apple_ip,Apple   # apple 分类码只在 geo-lite/mrs 里，v2ray geoip.dat 没有
   - geoip,telegram,Telegram
   - geoip,netflix,NETFLIX
   - geoip,cn,直连
@@ -210,6 +211,7 @@ rules:
 rule-providers:
   fakeipfilter_cn: {<<: *domain_text, url: "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-cn.list"}
   fakeipfilter_!cn: {<<: *domain_text, url: "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-!cn.list"}
+  apple_ip: {<<: *ip, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/refs/heads/meta/geo-lite/geoip/apple.mrs"}
   inline:
     type: inline
     behavior: domain

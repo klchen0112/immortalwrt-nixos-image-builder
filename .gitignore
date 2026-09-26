@@ -1,2 +1,4 @@
 result
 result-*
+# 本地密钥（订阅 URL / token 等），绝不提交
+.secrets/

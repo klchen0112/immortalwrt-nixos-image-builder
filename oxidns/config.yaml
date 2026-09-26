@@ -24,58 +24,67 @@ plugins:
   # ------------------------------------------------------------------
   # 订阅刷新：规则文件全部落在 <working-dir>/rules/
   # ------------------------------------------------------------------
+  # 规则来源（2026-09-26 起）：
+  #   geosite/geoip 都取自 **MetaCubeX/meta-rules-dat**，且与 mihomo **共用同一份文件**
+  #     /etc/mihomo/GeoSite.dat(4.3M) + /etc/mihomo/geoip.dat(16.6M)
+  #     - 日常写入者 = mihomo（geox-url + geo-auto-update: true / 24h）
+  #     - oxidns 只在文件缺失时补下载（startup_if_missing + 每周兜底一次）
+  #   广告拦截不再单独下 adguard.txt，直接用 geosite 的 category-ads-all / win-spy / win-extra
   - tag: subscription_cron
     type: cron
     args:
       timezone: Asia/Shanghai
       jobs:
-        - name: refresh_rule_subscriptions
+        # 注意：不能用 schedule:（cron 插件会把 timezone 拼成 '0 5 * * 0 Asia/Shanghai' 再去解析，必然失败并导致
+        # 插件初始化失败 → oxidns 起不来）。统一用 interval。
+        - name: refresh_rule_providers
           interval: 24h
           executors:
             - $subscription_refresh
+        - name: bootstrap_shared_geodata
+          interval: 168h
+          executors:
+            - $geodata_bootstrap
 
   - tag: subscription_refresh
     type: sequence
     args:
-      - exec: $subscription_download
       - exec: $reload_rule_providers
 
-  - tag: subscription_download
+  - tag: geodata_bootstrap
+    type: sequence
+    args:
+      - exec: $download_shared_geodata
+      - exec: $reload_rule_providers
+
+  - tag: download_shared_geodata
     type: download
     args:
-      timeout: 60s
+      timeout: 120s
       startup_if_missing: true
       downloads:
-        - url: https://anti-ad.net/adguard.txt
-          dir: ./rules
-          filename: adguard.txt
-        - url: https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat
-          dir: ./rules
-          filename: geosite.dat
-        - url: https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/geoip-only-cn-private.dat
-          dir: ./rules
+        - url: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat
+          dir: /etc/mihomo
+          filename: GeoSite.dat
+        - url: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat
+          dir: /etc/mihomo
           filename: geoip.dat
 
   # ------------------------------------------------------------------
   # provider（规则集）
   # ------------------------------------------------------------------
-  - tag: ad_rules
-    type: adguard_rule
-    args:
-      files:
-        - ./rules/adguard.txt
 
   - tag: geoip_cn
     type: geoip
     args:
-      file: ./rules/geoip.dat
+      file: /etc/mihomo/geoip.dat
       selectors:
         - cn
 
   - tag: geosite_cn
     type: geosite
     args:
-      file: ./rules/geosite.dat
+      file: /etc/mihomo/GeoSite.dat
       selectors:
         - cn
         - apple@cn
@@ -86,7 +95,7 @@ plugins:
   - tag: category_ads_all
     type: geosite
     args:
-      file: ./rules/geosite.dat
+      file: /etc/mihomo/GeoSite.dat
       selectors:
         - category-ads-all
         - win-spy
@@ -138,7 +147,6 @@ plugins:
       - $geoip_cn
       - $geosite_cn
       - $category_ads_all
-      - $ad_rules
 
   # ------------------------------------------------------------------
   # 上游
@@ -246,8 +254,6 @@ plugins:
       - matches: qtype 65 255
         exec: reject 0
       - matches: qname $category_ads_all
-        exec: $ad_blackhole
-      - matches: qname $ad_rules
         exec: $ad_blackhole
       - matches: qname $local_ptr
         exec: reject 3
