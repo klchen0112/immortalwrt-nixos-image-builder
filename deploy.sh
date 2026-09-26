@@ -16,8 +16,10 @@
 #   ./deploy.sh oxidns          # 本地 check + 备份 + 部署 + 重启
 #   ./deploy.sh both            # 两个都做
 #   ./deploy.sh mihomo --no-restart
+#   ./deploy.sh both 10.0.0.5            # 部署到指定 IP
+#   ./deploy.sh both router.local        # 部署到指定主机名（优先级高于 $ROUTER）
 #
-# 环境变量：ROUTER（默认 192.168.10.1）
+# 目标优先级：位置参数(2) > 环境变量 ROUTER > 默认 192.168.10.1
 # ============================================================================
 set -euo pipefail
 
@@ -97,6 +99,8 @@ deploy_oxidns() {
 }
 
 TARGET="${1:-both}"; shift || true
+# 第二个位置参数可覆盖目标（IP 或主机名）；默认 ROUTER 环境变量（192.168.10.1）
+[ -n "${1:-}" ] && ! [ "${1:-}" = "--no-restart" ] && W="$1" && shift || true
 [ "${1:-}" = "--no-restart" ] && export NO_RESTART=1
 
 case "$TARGET" in
