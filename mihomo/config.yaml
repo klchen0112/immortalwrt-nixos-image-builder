@@ -52,7 +52,7 @@ proxies:
   #     所以 log-level 必须是 info 才看得到）；登录态存在 state-dir 里，重启不丢。
   - name: TS
     type: tailscale
-    hostname: a99r50-router
+    hostname: cudy-tr3000
     state-dir: ./tailscale        # → /etc/mihomo/tailscale（必须在工作目录内，否则 IsSafePath 直接拒绝）
     udp: true
     accept-routes: true
