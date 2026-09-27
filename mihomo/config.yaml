@@ -75,7 +75,8 @@ unified-delay: true
 tcp-concurrent: true
 log-level: warning
 keep-alive-idle: 600
-keep-alive-interval: 15
+keep-alive-interval: 30
+geosite-matcher: mph   # 更快的 GeoSite 匹配器（mph 前缀哈希）；默认 default，提速明显
 profile:
   store-selected: true
   store-fake-ip: true
