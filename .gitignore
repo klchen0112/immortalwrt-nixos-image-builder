@@ -2,3 +2,6 @@ result
 result-*
 # 本地密钥（订阅 URL / token 等），绝不提交
 .secrets/
+# 生成配置（含真实订阅 URL），勿提交
+mihomo/config.rendered.yaml
+mihomo/config.merged.yaml

@@ -1,0 +1,290 @@
+# ============================================================================
+# smart 版配置 —— **完整保留 config.yaml 的全部分流规则**，另加 smart 智能选路层。
+#   本文件 = config.yaml 逐行复制后只做 4 处叠加（都带「smart 叠加」注释，方便与原文件 diff）：
+#     ① rule-anchor 增 SMART 锚点
+#     ② S1/S2/S3/G1 锚点末尾追加 5 个智能组（默认仍是列表首项 → 行为与原配置一致，只是多了可选项）
+#     ③ proxy-groups 增「香港/日本/狮城/美国/全部智能」5 个组
+#     ④ profile 增 smart-collector-size（collectdata 落盘上限，防 overlay 被写满）
+#   规则(geosite/geoip/AND-QUIC 防泄漏/DOMAIN-SUFFIX)、服务组(AI/HF下载/YouTube/Google/GitHub/
+#   Telegram/TikTok/NETFLIX/Wallet/Steam/Microsoft/OneDrive/Apple)、故转+自动+手动组、DNS、
+#   Tailscale、nft 相关全部与 config.yaml 一致 —— 改规则请两边同步（或直接改本文件后 deploy.sh smart）。
+#   内核要求：vernesong/mihomo 的 alpha-smart 版（普通 mihomo 不认 type: smart）。
+# ============================================================================
+# 必读！！！
+# mihomo当前版本理论上较完美的分流准确同时防泄露专业版本（nikki，openclash等官方内核的都可以跑），如果用不明白，建议使用config.yaml
+# 因为DNS流程较多，尽可能用本地搭建DNS开启乐观缓存。
+# 因为配置里开启了绕过大陆，google商店会无法更新，可以尝试把 "+.googleapis.cn"  "+.xn--ngstr-lra8j.com" 两个域名后缀指定走国外DNS，同时rules里添加走代理，理论上可以解决，或者关闭绕过大陆。
+rule-anchor:
+  P: &P {type: http, interval: 86400, health-check: {enable: true, url: 'https://www.gstatic.com/generate_204', interval: 300}, exclude-filter: "官网|剩余|流量|套餐|订阅|直连|到期时间|GB|Expire Date|Traffic|ExpireDate", proxy: 直连}
+  # interval: 0 时订阅永不自动刷新（只有重启/手动 PUT 才更新）→ 用 86400（每天）
+  # proxy: 直连 是「拉订阅用的 egress」；被 ISP 挡的订阅必须单独改成走代理（见 proxy-providers）
+  # 节点选择
+  # —— smart 叠加 ②：G1/S1/S2/S3 末尾追加 5 个智能组 ——
+  #   放在「直连」之前、原成员之后：select 组默认选中**列表首项**，所以原行为（故转/手动/自动优先）
+  #   完全不变，只是面板里多了「XX智能」可选项。想让智能成为默认，把对应锚点里的智能组挪到最前即可。
+  G1: &G1 {type: select, proxies: [默认代理, 香港故转, 日本故转, 台湾故转, 狮城故转, 美国故转, 香港手动, 日本手动, 台湾手动, 狮城手动, 美国手动, 香港自动, 日本自动, 台湾自动, 狮城自动, 美国自动, 全部自动, 全部手动, 香港智能, 日本智能, 狮城智能, 美国智能, 全部智能, 直连]}
+  S1: &S1 {type: select, proxies: [香港故转, 日本故转, 台湾故转, 狮城故转, 美国故转, 香港手动, 日本手动, 台湾手动, 狮城手动, 美国手动, 香港自动, 日本自动, 台湾自动, 狮城自动, 美国自动, 全部自动, 全部手动, 香港智能, 日本智能, 狮城智能, 美国智能, 全部智能, 直连]}
+  S2: &S2 {type: select, proxies: [日本故转, 香港故转, 台湾故转, 狮城故转, 美国故转, 香港手动, 日本手动, 台湾手动, 狮城手动, 美国手动, 香港自动, 日本自动, 台湾自动, 狮城自动, 美国自动, 全部自动, 全部手动, 香港智能, 日本智能, 狮城智能, 美国智能, 全部智能, 直连]}
+  S3: &S3 {type: select, proxies: [美国故转, 香港故转, 日本故转, 台湾故转, 狮城故转, 香港手动, 日本手动, 台湾手动, 狮城手动, 美国手动, 香港自动, 日本自动, 台湾自动, 狮城自动, 美国自动, 全部自动, 全部手动, 香港智能, 日本智能, 狮城智能, 美国智能, 全部智能, 直连]}
+  S5: &S5 {type: url-test, proxies: [直连, DIRECT], interval: 3600, lazy: true, url: "http://connect.rom.miui.com/generate_204"}
+  # 节点筛选
+  HK: &HK "(?=.*(港|HK|(?i)Hong))^((?!(台|日|韩|新|深|美)).)*$"
+  JP: &JP "(?=.*(日|JP|(?i)Japan))^((?!(港|台|韩|新|美)).)*$"
+  TW: &TW "(?=.*(台|TW|(?i)Taiwan))^((?!(港|韩|新|美)).)*$"
+  SG: &SG "(?=.*(新加坡|坡|狮城|SG|Singapore))^((?!(港|台|日|韩|ZJ)).)*$"
+  US: &US "(?=.*(美|US|(?i)States|America))^((?!(港|台|日|韩|新)).)*$"
+  Exclude: &Exclude "^((?!(官网|剩余|流量|套餐|订阅|到期时间|直连|GB|Expire Date|Traffic|ExpireDate)).)*$"
+  # 策略组
+  SD: &SD {type: select, include-all: true}
+  FB: &FB {type: fallback, include-all: true, interval: 300, lazy: true, url: 'https://www.gstatic.com/generate_204'}
+  URL: &URL {type: url-test, include-all: true, tolerance: 50, interval: 300, lazy: true, url: 'https://www.gstatic.com/generate_204'}
+  # —— smart 叠加 ①：智能组锚点（vernesong alpha-smart 内核专属）——
+  #   该内核 SmartOption 只认这几个键：policy-priority / uselightgbm / collectdata / sample-rate /
+  #   prefer-asn / tolerance（没有 strategy）。uselightgbm 需要 Model.bin（/etc/mihomo/Model.bin，缺失会自动下载）。
+  #   policy-priority 按节点名加权：<1 降权（少采样）、>1 加权（优先）。
+  SMART: &SMART {type: smart, uselightgbm: true, collectdata: true, policy-priority: "Premium:0.9;SG:1.3;US:0.8;HK:0.9", include-all: true, interval: 300}
+  SmartIcon: &SmartIcon "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/smart.png"
+  # 智能组的节点筛选：比 Exclude 多排掉 TS —— include-all 会把本文件 proxies 里的「直连」「TS」也算进来，
+  #   TS（tailscale）只是给 192.168.0.0/24 那条规则用的出站，绝不该被智能组当普通节点挑走。
+  SmartExclude: &SmartExclude "^((?!(官网|剩余|流量|套餐|订阅|到期时间|直连|TS|GB|Expire Date|Traffic|ExpireDate)).)*$"
+  # ICON
+  Failover: &Failover "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/failover.png"
+  Auto: &Auto "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/auto.png"
+  All: &All "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/all.png"
+  # 规则集
+  ip: &ip {type: http, interval: 86400, behavior: ipcidr, format: mrs}
+  domain: &domain {type: http, interval: 86400, behavior: domain, format: mrs}
+  domain_text: &domain_text {type: http, interval: 86400, behavior: domain, format: text}
+
+proxy-providers:
+  cad: {<<: *P, url: "__SECRET_CAD_URL__"}                                  # 直连可达（实测 200 / 0.48s）→ 保持 egress=直连
+  ikuu: {<<: *P, proxy: 默认代理, url: "__SECRET_IKUU_URL__"}                # 直连被 ISP 挡（实测 12s 超时 / 0 字节），egress 改走代理组
+  # 选组要点（实测 2026-09-26）：provider 的 proxy: 能用策略组名，但要挑对该 URL 真出得了网的组 ——
+  #   默认代理/香港故转/香港自动/GLOBAL 用 /proxies/<组>/delay?url=<订阅URL> 测都返回 delay（可用），
+  #   而「全部自动」「狮城自动」这类 URLTest+include-all 大组整体测试直接报错，换成它们照样拉不动。
+  # ⚠️ ikuu 走代理的前提是策略组里有活节点：给 cad 留 `proxy: 直连` 就是为了打破这个循环，
+  #    （全新设备/清空缓存时先靠 cad 直连拿到节点，ikuu 才拉得动）。
+
+proxies:
+  - {name: 直连, type: direct, udp: true}
+  # Tailscale 出站节点（家里 LAN 走它）：
+  #   - mihomo 的 tailscale 只有出站能力（没有入站 listener，也没有 advertise-routes）；
+  #     `accept-routes: true` = 接收 tailnet 里发布的 subnet routes（家里那台 advertise 的 192.168.0.0/24），
+  #     再由 rules 第一行 `IP-CIDR,192.168.0.0/24,TS,no-resolve` 把去家里的流量指过来。
+  #   - 懒加载：只有第一次「命中」才初始化（不随 mihomo 启动）→ 首次访问家里超时是正常的，多试几次。
+  #   - 没填 auth-key → 首次初始化时 tsnet 会打印交互式登录 URL（UserLogf=info 级，
+  #     所以 log-level 必须是 info 才看得到）；登录态存在 state-dir 里，重启不丢。
+  - name: TS
+    type: tailscale
+    hostname: cudy-tr3000
+    auth-key: "__SECRET_TS_AUTHKEY__"   # 真值放 .secrets/tailscale.env（不进仓库）；留空=回退交互式登录 URL
+    state-dir: ./tailscale        # → /etc/mihomo/tailscale（必须在工作目录内，否则 IsSafePath 直接拒绝）
+    udp: true
+    accept-routes: true
+    dialer-proxy: 默认代理         # 控制面/DERP 走代理（国内直连不稳）；若直连能通可删掉这行
+
+mixed-port: 7890
+tproxy-port: 7895
+redir-port: 7899
+authentication:
+- "user:passwd"
+skip-auth-prefixes:
+- 127.0.0.0/8
+- 192.168.0.0/16
+allow-lan: true
+bind-address: "*"
+ipv6: false
+find-process-mode: off   # 路由器上不需要进程匹配（官方 docs/config.yaml 建议 off）
+unified-delay: true
+tcp-concurrent: true
+log-level: warning
+keep-alive-idle: 600
+keep-alive-interval: 30
+geosite-matcher: mph   # 更快的 GeoSite 匹配器（mph 前缀哈希）；默认 default，提速明显
+profile:
+  store-selected: true
+  store-fake-ip: true
+  # —— smart 叠加 ④：collectdata 的落盘上限（MB）——
+  #   内核默认 100MB（component/smart/lightgbm/collector.go: defaultSmartCollectorSize），
+  #   超限只是**停止采集**、不会自动清理；路由器 overlay 只有 ~110MB 可用，收到 20MB 更稳。
+  smart-collector-size: 20
+
+external-controller: 0.0.0.0:9090
+secret: ""
+external-ui: ui
+external-ui-name: zashboard
+external-ui-url: "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
+geox-url:
+  # mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
+  geosite: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat   # 与 oxidns 共用 /etc/mihomo/GeoSite.dat（MetaCubeX 版，4.3M）
+  geoip: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat   # 与 oxidns 共用 /etc/mihomo/geoip.dat（v2ray 格式；只有 meta 这套含 google/netflix 等分类码）
+geo-auto-update: false
+geo-update-interval: 24
+geodata-mode: true        # geoip 规则读 /etc/mihomo/geoip.dat（与 oxidns 共用同一份；false 则用 country.mmdb）
+
+ntp:
+  enable: true
+  write-to-system: true
+
+tun:
+  enable: false
+  stack: mixed   ##如果内核版本大于v1.19.31，此处可以改为自研协议栈 mips ，理论上性能更好。
+  #dns-hijack: ["any:53", "tcp://any:53"]
+  auto-route: true
+  auto-redirect: true
+  auto-detect-interface: true
+
+sniffer:
+  enable: false
+  override-destination: false
+  force-dns-mapping: false
+  parse-pure-ip: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  skip-domain:
+    - "Mijia Cloud"
+    - "+.push.apple.com"
+
+# ============================================================================
+# DNS 上游锚点 —— dns: 段里统一用 *direct-dns / *global-dns 引用
+#   两条链目前都指 oxidns 混合流水线 :5336（国内域名→国内上游真实 IP，
+#   非国内→Cloudflare/Google DoH 真实 IP，且带 oxidns hosts 内网映射）。
+#   换上游只改这里一处，nameserver / fallback / nameserver-policy 全部跟着变。
+#   ⚠️ 别把 direct-dns 换成 :5337（纯国内链）：cn_pipeline 里没有 $hosts，且对国外域名
+#      只会返回被污染的国内答案 —— inline（内网域名）和 fakeipfilter_!cn 会一起坏掉。
+# ============================================================================
+dns-anchor:
+  # 国内 DNS 列表锚点
+  direct-dns: &direct-dns
+    - 127.0.0.1:5336        # oxidns 混合流水线（国内优先 → 真实 IP）
+    # - 223.5.5.5           # 兜底：oxidns 不可用时临时解注释（会绕过 ECS/hosts）
+  # 国外 DNS 列表锚点
+  global-dns: &global-dns
+    - 127.0.0.1:5336        # oxidns 混合流水线（非国内 → 国外 DoH 真实 IP）
+    # - https://1.1.1.1/dns-query   # 兜底同上（由 mihomo 走代理出去）
+
+dns:
+  enable: true
+  cache-algorithm: arc
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-ttl: 1
+  fake-ip-range: 28.0.0.0/16
+  fake-ip-filter-mode: blacklist
+  listen: 0.0.0.0:6666
+  default-nameserver: *direct-dns          # 引导用：只解析 DNS 服务器地址（必须纯 IP）
+  proxy-server-nameserver: *direct-dns     # 节点域名解析
+  direct-nameserver: *direct-dns           # 走直连的域名
+  nameserver-policy:
+    "rule-set:inline": *direct-dns           # 靠 oxidns hosts 命中，拿内网地址（必须在混合链上）
+    "rule-set:fakeipfilter_cn": *direct-dns  # 国内域名：拿真实 IP
+    "geosite:cn,private,steam@cn,microsoft@cn,apple@cn": *direct-dns
+    "rule-set:fakeipfilter_!cn": *global-dns # 这些国外域名必须拿真实 IP
+  nameserver: *global-dns                  # 默认链
+  fallback: *global-dns
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+  fake-ip-filter:
+    - rule-set:fakeipfilter_cn
+    - rule-set:fakeipfilter_!cn
+    - geosite:private
+    # 不要放 geosite:cn —— oxidns :5335 已经按 geosite_cn 决定「国内→真实 IP」，这里再拦一次会把
+    # oxidns force_noncn 名单里的域名（pterclub.com 等）反向覆盖成真实 IP（实测 2026-09-26）。
+    # MetaCubeX 的 cn 名单会收录这类站点，Loyalsoldier 版不会 —— 换名单时必须复核这条。
+    - geosite:microsoft@cn
+    - geosite:apple@cn
+    - geosite:steam@cn
+    - rule-set:inline
+
+
+proxy-groups:
+  - {name: 默认代理, <<: *S1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/select.png"}
+  # —— smart 叠加 ③：5 个智能组（按地区筛节点 + uselightgbm 按历史延迟/成功率与关键词加权选路）——
+  #   filter 复用上面的 HK/JP/SG/US/Exclude 正则；include-all 覆盖两个 provider 的全部节点
+  #   （「直连」被 Exclude 排除，不会混进来）。选路链默认仍是故转/手动/自动优先，智能组按需手动切。
+  - {name: 香港智能, <<: *SMART, filter: *HK, icon: *SmartIcon}
+  - {name: 日本智能, <<: *SMART, filter: *JP, icon: *SmartIcon}
+  - {name: 狮城智能, <<: *SMART, filter: *SG, icon: *SmartIcon}
+  - {name: 美国智能, <<: *SMART, filter: *US, icon: *SmartIcon}
+  - {name: 全部智能, <<: *SMART, filter: *SmartExclude, icon: *SmartIcon}
+  - {name: AI, type: select, proxies: [日本故转, 美国故转, 默认代理, 直连],default: 日本故转, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/ai.png"}
+  - {name: HF下载, <<: *SD, filter: "下载专用", proxies: [日本故转, 美国故转], icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/ai.png"}
+  - {name: YouTube, <<: *S1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/youtube.png"}
+  - {name: Google, <<: *S1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/google.png"}
+  - {name: GitHub, <<: *S2, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/github.png"}
+  - {name: Telegram, <<: *S1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/telegram.png"}
+  - {name: TikTok, <<: *S3, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/douyin.png"}
+  - {name: NETFLIX, <<: *S3, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/netflix.png"}
+  - {name: Wallet, <<: *S3, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/wallet.png"}
+  - {name: Steam, <<: *S1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/steam.png"}
+  - {name: Microsoft, <<: *S2, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/microsoft.png"}
+  - {name: OneDrive, <<: *S2, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/onedrive.png"}
+  - {name: Apple, <<: *S1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/apple.png"}
+  - {name: 漏网之鱼, <<: *G1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/final.png"}
+  - {name: 香港手动, <<: *SD, filter: *HK, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/flag/corner/hongkong.png"}
+  - {name: 日本手动, <<: *SD, filter: *JP, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/flag/corner/japan.png"}
+  - {name: 台湾手动, <<: *SD, filter: *TW, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/flag/corner/taiwan.png"}
+  - {name: 狮城手动, <<: *SD, filter: *SG, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/flag/corner/singapore.png"}
+  - {name: 美国手动, <<: *SD, filter: *US, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/flag/corner/usa.png"}
+  - {name: CAD故转, <<: *FB, use: [cad],  icon: *Failover}
+  - {name: 香港故转, <<: *FB, filter: *HK, icon: *Failover}
+  - {name: 日本故转, <<: *FB, filter: *JP, icon: *Failover}
+  - {name: 台湾故转, <<: *FB, filter: *TW, icon: *Failover}
+  - {name: 狮城故转, <<: *FB, filter: *SG, icon: *Failover}
+  - {name: 美国故转, <<: *FB, filter: *US, icon: *Failover}
+  - {name: 香港自动, <<: *URL, filter: *HK, icon: *Auto}
+  - {name: 日本自动, <<: *URL, filter: *JP, icon: *Auto}
+  - {name: 台湾自动, <<: *URL, filter: *TW, icon: *Auto}
+  - {name: 狮城自动, <<: *URL, filter: *SG, icon: *Auto}
+  - {name: 美国自动, <<: *URL, filter: *US, icon: *Auto}
+  - {name: 全部手动, <<: *SD, filter: *Exclude, icon: *All}
+  - {name: 全部自动, <<: *URL, filter: *Exclude, icon: *Auto}
+  - {name: 延迟辅助, <<: *S5, icon: *Auto}
+  - {name: GLOBAL, <<: *G1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/all.png"}
+
+rules:
+  - IP-CIDR,192.168.0.0/24,TS,no-resolve   # 家里 LAN（192.168.0.10/24）走 Tailscale；必须在 geoip,private,直连 之前
+  - AND,((geosite,geolocation-!cn),(DST-PORT,443),(NETWORK,UDP)),REJECT
+  - geoip,private,直连,no-resolve
+  - geosite,private,直连
+  - DOMAIN-SUFFIX,huggingface.co,HF下载
+  - geosite,category-ai-!cn,AI
+  - geosite,youtube,YouTube
+  - geosite,google,Google
+  - geosite,github,GitHub
+  - geosite,onedrive,OneDrive
+  - geosite,microsoft@cn,直连
+  - geosite,microsoft,Microsoft
+  - geosite,apple@cn,直连
+  - geosite,apple,Apple
+  - geosite,telegram,Telegram
+  - geosite,tiktok,TikTok
+  - geosite,netflix,NETFLIX
+  - geosite,paypal,Wallet
+  - geosite,binance,Wallet
+  - geosite,okx,Wallet
+  #- geosite,usd,Wallet
+  - geosite,steam@cn,直连
+  - geosite,steam,Steam
+  - geosite,geolocation-!cn,默认代理
+  - geoip,google,Google
+  - geoip,telegram,Telegram
+  - geoip,netflix,NETFLIX
+  - geoip,cn,直连
+  - MATCH,漏网之鱼
+
+rule-providers:
+  fakeipfilter_cn: {<<: *domain_text, url: "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-cn.list"}
+  fakeipfilter_!cn: {<<: *domain_text, url: "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-!cn.list"}
+  inline:
+    type: inline
+    behavior: domain
+    payload:
+      - ".klchen.duckdns.org"
+
