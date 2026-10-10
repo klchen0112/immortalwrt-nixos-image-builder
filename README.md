@@ -14,7 +14,7 @@ ImmortalWrt 25.12 固件构建 + 路由器配置仓库，主机 **a99r50**（Cud
 ├── Justfile               # 构建快捷命令（nix-fast-build + cachix）
 ├── deploy.sh              # 部署脚本：渲染密钥 → 校验 → 备份 → 部署 → 重启
 ├── .gitignore             # .secrets/ 等本地密钥不进仓库
-├── .secrets/              # 本地密钥（订阅 URL / Tailscale auth-key），gitignore
+├── .secrets/              # 本地密钥（订阅 URL / Tailscale auth-key / oxidns API 密码），gitignore
 │   ├── mihomo-providers.env   # PROVIDER_CAD_URL / PROVIDER_IKUU_URL
 │   └── tailscale.env          # TS_AUTHKEY（可选）
 ├── mihomo/
@@ -35,6 +35,7 @@ ImmortalWrt 25.12 固件构建 + 路由器配置仓库，主机 **a99r50**（Cud
 - 真实值放在 `.secrets/mihomo-providers.env`（`.gitignore`，`chmod 600`）。
 - `deploy.sh` 本地把占位符渲染成真实值，再 SSH 推上去。渲染后仍残留占位符会直接 `die`。
 - `.secrets/` 下还有 Tailscale 可选的 `TS_AUTHKEY`（`tailscale.env`）。
+- oxidns 的 API basic auth 也是占位符 `__SECRET_OXIDNS_USER__` / `__SECRET_OXIDNS_PASSWORD__`，真值在**必需**的 `.secrets/oxidns.env`；`deploy.sh oxidns` 会先用路由器上的 oxidns 二进制 `oxidns check` 校验**渲染后**的配置，不通过就不部署。
 
 > 仓库历史中从未提交过任何真实订阅串（已用 `git` 全对象扫描确认）。
 
@@ -80,7 +81,7 @@ ImmortalWrt 25.12 固件构建 + 路由器配置仓库，主机 **a99r50**（Cud
 - **混合链** `mixed_pipeline`：入口 `:5336`，国内优先，非国内再走国外真实 IP（mihomo 自用）。
 - **自动学习**：`mixed_pipeline` 真实 IP 解析成功后按归属回写 `learned_china`/`learned_foreign`（`learn_domain` → `dynamic_domain_set`，持久化在 `/var/lib/oxidns/rules/`），并回灌 `default_pipeline` 分流。
 - **无 geosite / geoip.dat**：域名分流用 MetaCubeX `meta-rules-dat@meta` 的单码 MRS（mihomo `rule-providers`，`format: mrs`）与 Loyalsoldier/anti-AD 文本名单（oxidns `domain_set`）；国内 IP 段用 `geo/geoip/cn.list`（oxidns `ip_set`）与单码 MRS（mihomo `behavior: ipcidr`）。名单文件由订阅 cron 下到 `/var/lib/oxidns/rules/` 与 `/etc/mihomo/rules/`（后者用 `path:` 指定可读文件名）。
-- API `192.168.10.1:9199`（WebUI + basic auth）。
+- API `192.168.10.1:9199`（WebUI + basic auth，密码来自 `.secrets/oxidns.env`，不入库）。
 
 验收：
 

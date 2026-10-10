@@ -23,8 +23,8 @@ api:
     listen: "192.168.10.1:9199"
     auth:
       type: basic
-      username: "admin"
-      password: "secret"
+      username: "__SECRET_OXIDNS_USER__"
+      password: "__SECRET_OXIDNS_PASSWORD__"   # 真值在 .secrets/oxidns.env（不进仓库）
     webui:
       root: "/usr/share/oxidns/webui/"
       index: "index.html"

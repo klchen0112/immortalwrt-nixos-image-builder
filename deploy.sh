@@ -36,6 +36,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 W="${ROUTER:-192.168.10.1}"
 SECRETS="$REPO/.secrets/mihomo-providers.env"
 SECRETS_TS="$REPO/.secrets/tailscale.env"   # 可选：TS_AUTHKEY=tskey-auth-…（没有就回退交互式登录）
+SECRETS_OX="$REPO/.secrets/oxidns.env"       # 必需：OXIDNS_USER / OXIDNS_PASSWORD（oxidns API basic auth）
 SSH=(ssh -o BatchMode=yes "root@$W")
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
@@ -61,6 +62,20 @@ render_mihomo() {   # 占位符 → 真实值，结果写到 stdout；$1 为源�
   sed -e "s|__SECRET_CAD_URL__|${PROVIDER_CAD_URL}|" \
       -e "s|__SECRET_IKUU_URL__|${PROVIDER_IKUU_URL}|" \
       -e "s|__SECRET_TS_AUTHKEY__|${ts_key}|" \
+      "$src" > "$out"
+  if grep -q '__SECRET_' "$out"; then rm -f "$out"; die "渲染后仍有未替换的占位符（$src 里新增了占位符？）"; fi
+  cat "$out"; rm -f "$out"
+}
+
+render_oxidns() {   # 占位符 → 真实值，结果写到 stdout；$1 为源文件（oxidns/config.yaml）
+  local src="${1:?用法: render_oxidns <源文件>}"
+  [ -f "$SECRETS_OX" ] || die "缺少 $SECRETS_OX（oxidns API basic auth 所在文件）"
+  # shellcheck disable=SC1090
+  set -a; . "$SECRETS_OX"; set +a
+  [ -n "${OXIDNS_USER:-}" ] && [ -n "${OXIDNS_PASSWORD:-}" ] || die "$SECRETS_OX 里缺少 OXIDNS_USER / OXIDNS_PASSWORD"
+  local out; out="$(mktemp)"
+  sed -e "s|__SECRET_OXIDNS_USER__|${OXIDNS_USER}|" \
+      -e "s|__SECRET_OXIDNS_PASSWORD__|${OXIDNS_PASSWORD}|" \
       "$src" > "$out"
   if grep -q '__SECRET_' "$out"; then rm -f "$out"; die "渲染后仍有未替换的占位符（$src 里新增了占位符？）"; fi
   cat "$out"; rm -f "$out"
@@ -204,11 +219,19 @@ EOS
 
 deploy_oxidns() {
   say "备份 + 部署 oxidns 配置"
+  local rendered; rendered="$(mktemp)"
+  render_oxidns "$REPO/oxidns/config.yaml" > "$rendered"
+  # 先让路由器用同一份二进制校验渲染后的配置（占位符没被替换 / 密码里带 YAML 特殊字符都会在这里抦下）
+  "${SSH[@]}" 'mkdir -p /tmp/oxcheck' && "${SSH[@]}" 'cat > /tmp/oxcheck/config.yaml' < "$rendered"
+  say "oxidns check（渲染后的配置）"
+  "${SSH[@]}" 'oxidns check -c /tmp/oxcheck/config.yaml -d /var/lib/oxidns 2>&1 | tail -3' | grep -q 'Configuration is valid' \
+    || { rm -f "$rendered"; die "oxidns check 失败，不部署"; }
   backup_remote /etc/oxidns/config.yaml
-  "${SSH[@]}" 'cat > /etc/oxidns/config.yaml' < "$REPO/oxidns/config.yaml"
+  "${SSH[@]}" 'cat > /etc/oxidns/config.yaml' < "$rendered"
   "${SSH[@]}" 'chmod 600 /etc/oxidns/config.yaml'
   "${SSH[@]}" 'md5sum /etc/oxidns/config.yaml'
-  md5sum "$REPO/oxidns/config.yaml"
+  md5sum "$rendered"
+  rm -f "$rendered"
   if [ "${NO_RESTART:-0}" = 0 ]; then
     say "重启 oxidns"
     "${SSH[@]}" '/etc/init.d/oxidns restart >/dev/null 2>&1; sleep 16; echo "oxidns pid=$(pidof oxidns)"; logread | grep -i oxidns | tail -20 | grep -iE "error|failed" | tail -3'
