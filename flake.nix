@@ -38,8 +38,6 @@
         "kmod-nft-dup-inet"
         "kmod-nft-netdev"
         "kmod-nft-queue"
-        "kmod-nft-socket"
-        "kmod-nft-tproxy"
         "kmod-nft-xfrm"
         "kmod-nft-offload"
 
@@ -54,29 +52,21 @@
         "luci-theme-argon"
 
         "ca-bundle"
-        "htop"
-        "minicom"
 
-        "avahi-daemon-service-ssh"
-        "avahi-daemon-service-http"
-        "avahi-utils"
-        "wsdd2"
-
-        "dosfstools"
-        "f2fs-tools"
-        "f2fsck"
-
-        "luci-app-uhttpd"
-        "luci-i18n-uhttpd-zh-cn"
+        "luci-theme-argon"
         "wget-ssl"
         "libopenssl-legacy"
         "tmux"
-        "rsync"
-        "rsyncd"
+      ];
+      disks = [
+        "f2fs-tools"
+        "f2fsck"
       ];
       tools = [
         "-ethtool"
         "ethtool-full"
+        "rsync"
+        "rsyncd"
 
         "vim"
         "vim-runtime"
@@ -93,14 +83,16 @@
         "pppoe-discovery"
         "tcpdump"
 
-        "picocom"
       ];
       proxy = [
         "-dnsmasq"
         "dnsmasq-full"
         "ip-full"
-        "mosdns"
+        "kmod-nft-socket"
+        "kmod-nft-tproxy"
         "haveged"
+        "tailscale"
+        "kmod-tun"
       ];
       usb = [
         "kmod-usb2"
@@ -162,20 +154,42 @@
         "kmod-zram"
         "zram-swap"
       ];
+      pkgs = nixpkgs.legacyPackages.x86_64-linux;
+
+      profiles = immortalwrt-imagebuilder.lib.profiles { inherit pkgs; };
+
     in
+
     {
-      packages.x86_64-linux.cudy-tr3000 =
-        let
-          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      packages.x86_64-linux = {
+        cudy-tr3000 =
+          let
+            config = profiles.identifyProfile "cudy_tr3000-256mb-v1" // {
+              # add package to include in the image, ie. packages that you don't
+              # want to install manually later
+              packages = common ++ tools ++ proxy ++ usb ++ statistics ++ zram;
+            };
+          in
+          immortalwrt-imagebuilder.lib.build config;
 
-          profiles = immortalwrt-imagebuilder.lib.profiles { inherit pkgs; };
-
-          config = profiles.identifyProfile "cudy_tr3000-256mb-v1" // {
-            # add package to include in the image, ie. packages that you don't
-            # want to install manually later
-            packages = common ++ tools ++ proxy ++ usb ++ statistics ++ zram;
-          };
-        in
-        immortalwrt-imagebuilder.lib.build config;
+        redmi-ax6000 =
+          let
+            config = profiles.identifyProfile "xiaomi_redmi-router-ax6000-stock" // {
+              # add package to include in the image, ie. packages that you don't
+              # want to install manually later
+              packages = common ++ tools ++ proxy ++ statistics ++ zram;
+            };
+          in
+          immortalwrt-imagebuilder.lib.build config;
+        jcg-q20 =
+          let
+            config = profiles.identifyProfile "jcg_q20" // {
+              # add package to include in the image, ie. packages that you don't
+              # want to install manually later
+              packages = common ++ tools ++ statistics ++ zram;
+            };
+          in
+          immortalwrt-imagebuilder.lib.build config;
+      };
     };
 }

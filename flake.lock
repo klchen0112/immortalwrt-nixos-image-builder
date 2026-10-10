@@ -28,11 +28,11 @@
         "systems": "systems"
       },
       "locked": {
-        "lastModified": 1790086581,
-        "narHash": "sha256-IgniC24VASgdMtkXLvjpJaPxAfEzEffdVkntmJ6UlZg=",
+        "lastModified": 1790428278,
+        "narHash": "sha256-Uy84lr5ImhjoHjFShmdq+UgwjTXWAksd5YFVyD5NbBA=",
         "owner": "codgician",
         "repo": "nix-immortalwrt-imagebuilder",
-        "rev": "e376f5eb9b88004ddefa5144646da1cc7e704531",
+        "rev": "278cccf050247e186e782eabe6fd62b87ace281f",
         "type": "github"
       },
       "original": {
@@ -59,11 +59,11 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1790149054,
-        "narHash": "sha256-fcRceL4EcNlsCY2GWwzfIVrJyjbA2lpQSuljkc8UXOw=",
-        "rev": "8825bebf6324e0579d012936eff73379af284b6d",
+        "lastModified": 1790652569,
+        "narHash": "sha256-k8Fu4c9Z+4Nh7mUr0cfw++ITQiyEhlWxoJBOkI3tOcQ=",
+        "rev": "b6c8664de9b6cc07fe5666a29f91884ba81197c4",
         "type": "tarball",
-        "url": "https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1078395.8825bebf6324/nixexprs.tar.zst"
+        "url": "https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1082290.b6c8664de9b6/nixexprs.tar.zst"
       },
       "original": {
         "id": "nixpkgs",
