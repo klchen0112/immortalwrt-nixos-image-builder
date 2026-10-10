@@ -31,6 +31,7 @@ rule-anchor:
   ip: &ip {type: http, interval: 86400, behavior: ipcidr, format: mrs}
   domain: &domain {type: http, interval: 86400, behavior: domain, format: mrs}
   domain_text: &domain_text {type: http, interval: 86400, behavior: domain, format: text}
+  ipcidr: &ipcidr {type: http, interval: 86400, behavior: ipcidr, format: mrs}
 
 proxy-providers:
   cad: {<<: *P, url: "__SECRET_CAD_URL__"}                                  # 直连可达（实测 200 / 0.48s）→ 保持 egress=直连
@@ -76,7 +77,7 @@ tcp-concurrent: true
 log-level: warning
 keep-alive-idle: 600
 keep-alive-interval: 30
-geosite-matcher: mph   # 更快的 GeoSite 匹配器（mph 前缀哈希）；默认 default，提速明显
+# geosite-matcher 已删：本配置不再读 geosite.dat（域名分流全部走 rule-set / MRS）
 profile:
   store-selected: true
   store-fake-ip: true
@@ -85,14 +86,9 @@ external-controller: 0.0.0.0:9090
 secret: ""
 external-ui: ui
 external-ui-name: zashboard
-external-ui-url: "https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
-geox-url:
-  # mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
-  geosite: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat   # 与 oxidns 共用 /etc/mihomo/GeoSite.dat（MetaCubeX 版，4.3M）
-  geoip: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat   # 与 oxidns 共用 /etc/mihomo/geoip.dat（v2ray 格式；只有 meta 这套含 google/netflix 等分类码）
-geo-auto-update: false
-geo-update-interval: 24
-geodata-mode: true        # geoip 规则读 /etc/mihomo/geoip.dat（与 oxidns 共用同一份；false 则用 country.mmdb）
+external-ui-url: "https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip"
+# geoip 已删：geoip 规则全部换成 rule-providers 里的 geoip-lite 单码 MRS（见 ip_*），本机不再需要 geoip.dat；
+# geox-url / geo-auto-update / geo-update-interval / geodata-mode 全部移除，避免开机去拉 16M 的 geoip.dat
 
 ntp:
   enable: true
@@ -155,28 +151,30 @@ dns:
   nameserver-policy:
     "rule-set:inline": *direct-dns           # 靠 oxidns hosts 命中，拿内网地址（必须在混合链上）
     "rule-set:fakeipfilter_cn": *direct-dns  # 国内域名：拿真实 IP
-    "geosite:cn,private,steam@cn,microsoft@cn,apple@cn": *direct-dns
+    # rule-set 多码写法：前缀只写一次（rule-set:a,b,c）；写成 rule-set:a,rule-set:b 会被当成名为 rule-set 的 provider（实测 mihomo -t 报 not found rule-set）
+    "rule-set:gs_cn,gs_private,gs_steam_cn,gs_microsoft_cn,gs_apple_cn": *direct-dns
     "rule-set:fakeipfilter_!cn": *global-dns # 这些国外域名必须拿真实 IP
   nameserver: *global-dns                  # 默认链
   fallback: *global-dns
   fallback-filter:
-    geoip: true
-    geoip-code: CN
+    geoip: false          # 无 geoip.dat；nameserver 与 fallback 同为 oxidns :5336 混合链，此过滤本来就不起作用
   fake-ip-filter:
     - rule-set:fakeipfilter_cn
     - rule-set:fakeipfilter_!cn
-    - geosite:private
-    # 不要放 geosite:cn —— oxidns :5335 已经按 geosite_cn 决定「国内→真实 IP」，这里再拦一次会把
+    - rule-set:gs_private
+    # 不要放 rule-set:gs_cn —— oxidns :5335 已经按「国内名单」决定「国内→真实 IP」，这里再拦一次会把
     # oxidns force_noncn 名单里的域名（pterclub.com 等）反向覆盖成真实 IP（实测 2026-09-26）。
-    # MetaCubeX 的 cn 名单会收录这类站点，Loyalsoldier 版不会 —— 换名单时必须复核这条。
-    - geosite:microsoft@cn
-    - geosite:apple@cn
-    - geosite:steam@cn
+    # MetaCubeX 的 cn 名单会收录这类站点，oxidns 用的 Loyalsoldier china-list 不会 —— 换名单时必须复核这条。
+    - rule-set:gs_microsoft_cn
+    - rule-set:gs_apple_cn
+    - rule-set:gs_steam_cn
     - rule-set:inline
 
 
 proxy-groups:
   - {name: 默认代理, <<: *S1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/select.png"}
+  # —— 广告拦截开关：选 REJECT = 开，选 默认代理 = 关（zashboard 一键切，不用改配置）——
+  - {name: 广告拦截, type: select, proxies: [REJECT, 默认代理], default: REJECT, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/select.png"}
   - {name: AI, type: select, proxies: [日本故转, 美国故转, 默认代理, 直连],default: 日本故转, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/ai.png"}
   - {name: HF下载, <<: *SD, filter: "下载专用", proxies: [日本故转, 美国故转], icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/ai.png"}
   - {name: YouTube, <<: *S1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/youtube.png"}
@@ -213,39 +211,70 @@ proxy-groups:
   - {name: GLOBAL, <<: *G1, icon: "https://raw.githubusercontent.com/s0lnce/mofish-icon/refs/heads/main/mihomo/pure/corner/all.png"}
 
 rules:
-  - IP-CIDR,192.168.0.0/24,TS,no-resolve   # 家里 LAN（192.168.0.10/24）走 Tailscale；必须在 geoip,private,直连 之前
-  - AND,((geosite,geolocation-!cn),(DST-PORT,443),(NETWORK,UDP)),REJECT
-  - geoip,private,直连,no-resolve
-  - geosite,private,直连
+  - IP-CIDR,192.168.0.0/24,TS,no-resolve   # 家里 LAN（192.168.0.10/24）走 Tailscale；必须在 ip_private,直连 之前
+  - AND,((rule-set,gs_geolocation-!cn),(DST-PORT,443),(NETWORK,UDP)),REJECT
+  - rule-set,ip_private,直连,no-resolve
+  - rule-set,gs_private,直连
+  - rule-set,anti-ad,广告拦截   # 广告/追踪：先于各代理组，本地/内网规则已在上面放行；开关在「广告拦截」组
   - DOMAIN-SUFFIX,huggingface.co,HF下载
-  - geosite,category-ai-!cn,AI
-  - geosite,youtube,YouTube
-  - geosite,google,Google
-  - geosite,github,GitHub
-  - geosite,onedrive,OneDrive
-  - geosite,microsoft@cn,直连
-  - geosite,microsoft,Microsoft
-  - geosite,apple@cn,直连
-  - geosite,apple,Apple
-  - geosite,telegram,Telegram
-  - geosite,tiktok,TikTok
-  - geosite,netflix,NETFLIX
-  - geosite,paypal,Wallet
-  - geosite,binance,Wallet
-  - geosite,okx,Wallet
-  #- geosite,usd,Wallet
-  - geosite,steam@cn,直连
-  - geosite,steam,Steam
-  - geosite,geolocation-!cn,默认代理
-  - geoip,google,Google
-  - geoip,telegram,Telegram
-  - geoip,netflix,NETFLIX
-  - geoip,cn,直连
+  - rule-set,gs_category-ai-!cn,AI
+  - rule-set,gs_youtube,YouTube
+  - rule-set,gs_google,Google
+  - rule-set,gs_github,GitHub
+  - rule-set,gs_onedrive,OneDrive
+  - rule-set,gs_microsoft_cn,直连
+  - rule-set,gs_microsoft,Microsoft
+  - rule-set,gs_apple_cn,直连
+  - rule-set,gs_apple,Apple
+  - rule-set,gs_telegram,Telegram
+  - rule-set,gs_tiktok,TikTok
+  - rule-set,gs_netflix,NETFLIX
+  - rule-set,gs_paypal,Wallet
+  - rule-set,gs_binance,Wallet
+  - rule-set,gs_okx,Wallet
+  #- rule-set,gs_usd,Wallet
+  - rule-set,gs_steam_cn,直连
+  - rule-set,gs_steam,Steam
+  - rule-set,gs_geolocation-!cn,默认代理
+  - rule-set,ip_google,Google
+  - rule-set,ip_telegram,Telegram
+  - rule-set,ip_netflix,NETFLIX
+  - rule-set,ip_cn,直连
   - MATCH,漏网之鱼
 
 rule-providers:
-  fakeipfilter_cn: {<<: *domain_text, url: "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-cn.list"}
-  fakeipfilter_!cn: {<<: *domain_text, url: "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-!cn.list"}
+  # ---- geosite 替代品：meta-rules-dat meta 分支的 MRS（SRS）单码文件，总计 ~770K（geosite.dat 4.3M）----
+  gs_cn: {<<: *domain, path: rules/gs_cn.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/cn.mrs"}
+  # ---- geoip 替代品：meta-rules-dat meta 分支的 geoip-lite 单码 MRS，合计 ~46K（geoip.dat 16M）----
+  ip_private: {<<: *ipcidr, path: rules/ip_private.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geoip/private.mrs"}
+  ip_cn: {<<: *ipcidr, path: rules/ip_cn.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geoip/cn.mrs"}
+  ip_google: {<<: *ipcidr, path: rules/ip_google.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geoip/google.mrs"}
+  ip_telegram: {<<: *ipcidr, path: rules/ip_telegram.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geoip/telegram.mrs"}
+  ip_netflix: {<<: *ipcidr, path: rules/ip_netflix.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geoip/netflix.mrs"}
+  # anti-AD 官方 mihomo.mrs（846K，SRS/MRS 二进制，比 clash.yaml 的 2.7M 省内存）；
+  # anti-ad.net 是 Cloudflare，直连被 ISP 挡（实测 dial 超时），所以 egress 必须走代理组
+  anti-ad: {<<: *domain, path: rules/anti-ad.mrs, proxy: 默认代理, url: "https://anti-ad.net/mihomo.mrs"}
+  gs_private: {<<: *domain, path: rules/gs_private.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/private.mrs"}
+  gs_category-ai-!cn: {<<: *domain, path: rules/gs_category-ai-!cn.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/category-ai-!cn.mrs"}
+  gs_youtube: {<<: *domain, path: rules/gs_youtube.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/youtube.mrs"}
+  gs_google: {<<: *domain, path: rules/gs_google.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/google.mrs"}
+  gs_github: {<<: *domain, path: rules/gs_github.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/github.mrs"}
+  gs_onedrive: {<<: *domain, path: rules/gs_onedrive.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/onedrive.mrs"}
+  gs_microsoft_cn: {<<: *domain, path: rules/gs_microsoft_cn.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/microsoft@cn.mrs"}
+  gs_microsoft: {<<: *domain, path: rules/gs_microsoft.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/microsoft.mrs"}
+  gs_apple_cn: {<<: *domain, path: rules/gs_apple_cn.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/apple@cn.mrs"}
+  gs_apple: {<<: *domain, path: rules/gs_apple.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/apple.mrs"}
+  gs_telegram: {<<: *domain, path: rules/gs_telegram.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/telegram.mrs"}
+  gs_tiktok: {<<: *domain, path: rules/gs_tiktok.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/tiktok.mrs"}
+  gs_netflix: {<<: *domain, path: rules/gs_netflix.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/netflix.mrs"}
+  gs_paypal: {<<: *domain, path: rules/gs_paypal.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/paypal.mrs"}
+  gs_binance: {<<: *domain, path: rules/gs_binance.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/binance.mrs"}
+  gs_okx: {<<: *domain, path: rules/gs_okx.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/okx.mrs"}
+  gs_steam_cn: {<<: *domain, path: rules/gs_steam_cn.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/steam@cn.mrs"}
+  gs_steam: {<<: *domain, path: rules/gs_steam.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/steam.mrs"}
+  gs_geolocation-!cn: {<<: *domain, path: rules/gs_geolocation-!cn.mrs, url: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/geolocation-!cn.mrs"}
+  fakeipfilter_cn: {<<: *domain_text, path: rules/fakeipfilter_cn.list, url: "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-cn.list"}
+  fakeipfilter_!cn: {<<: *domain_text, path: rules/fakeipfilter-!cn.list, url: "https://raw.githubusercontent.com/qichiyuhub/rule/refs/heads/main/rules/fakeipfilter-!cn.list"}
   inline:
     type: inline
     behavior: domain

@@ -5,3 +5,6 @@ result-*
 # 生成配置（含真实订阅 URL），勿提交
 mihomo/config.rendered.yaml
 mihomo/config.merged.yaml
+# oxidns 规则名单（全部由订阅 cron 从上游下载）与自动学习文件，勿提交
+oxidns/rules/
+oxidns/learn.yaml

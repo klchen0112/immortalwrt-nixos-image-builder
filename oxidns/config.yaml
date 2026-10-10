@@ -6,6 +6,15 @@
 #   辅助链   混合   mixed_pipeline    入口 :5336   国内优先，非国内再走国外真实 IP（mihomo 自己用）
 # working-dir = /var/lib/oxidns（/etc/init.d/oxidns 传 -d），所有 ./ 路径都相对它
 # ============================================================================
+# 规则来源（2026-10-10 起）：**oxidns 不再读 geosite.dat**，改用纯文本域名名单
+#   国内   Loyalsoldier v2ray-rules-dat release/china-list.txt（111k 条，无后缀前缀=后缀匹配）
+#   国外   Loyalsoldier release/gfw.txt（4.4k）+ 手写 force_noncn + 自动学习
+#   广告   anti-ad.net/domains.txt（108k 裸域名，后缀匹配）+ 仓库里的 ad-whitelist.txt（49 条白名单）
+#          + Loyalsoldier win-spy（Windows 遥测）
+#   geoip  也已删：国内 IP 段改用 meta-rules-dat 的 geoip-lite 单码文本表 cn.list（153K，9608 条 CIDR）
+#   geosite 已全部删除：oxidns 用文本名单，mihomo 用 MRS 单码 rule-set，本机不再有 GeoSite.dat
+# 名单全部落在 /var/lib/oxidns/rules/（overlay），24h 刷新一次
+# ============================================================================
 log:
   level: error
 
@@ -22,14 +31,8 @@ api:
 
 plugins:
   # ------------------------------------------------------------------
-  # 订阅刷新：规则文件全部落在 <working-dir>/rules/
+  # 订阅刷新：文本名单 + 国内 IP 段表 → /var/lib/oxidns/rules/
   # ------------------------------------------------------------------
-  # 规则来源（2026-09-26 起）：
-  #   geosite/geoip 都取自 **MetaCubeX/meta-rules-dat**，且与 mihomo **共用同一份文件**
-  #     /etc/mihomo/GeoSite.dat(4.3M) + /etc/mihomo/geoip.dat(16.6M)
-  #     - 日常写入者 = mihomo（geox-url + geo-auto-update: true / 24h）
-  #     - oxidns 只在文件缺失时补下载（startup_if_missing + 每周兜底一次）
-  #   广告拦截不再单独下 adguard.txt，直接用 geosite 的 category-ads-all / win-spy / win-extra
   - tag: subscription_cron
     type: cron
     args:
@@ -41,65 +44,151 @@ plugins:
           interval: 24h
           executors:
             - $subscription_refresh
-        - name: bootstrap_shared_geodata
+        - name: bootstrap_cn_ip_list
           interval: 168h
           executors:
-            - $geodata_bootstrap
+            - $cn_ip_bootstrap
 
   - tag: subscription_refresh
     type: sequence
     args:
+      - exec: $download_rule_lists
       - exec: $reload_rule_providers
 
-  - tag: geodata_bootstrap
+  - tag: cn_ip_bootstrap
     type: sequence
     args:
-      - exec: $download_shared_geodata
+      - exec: $download_cn_ip_list
       - exec: $reload_rule_providers
 
-  - tag: download_shared_geodata
+  # 文本名单（每行一条域名规则；# 为注释；无前缀 = domain: 后缀匹配）
+  - tag: download_rule_lists
     type: download
     args:
       timeout: 120s
       startup_if_missing: true
       downloads:
-        - url: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat
-          dir: /etc/mihomo
-          filename: GeoSite.dat
-        - url: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat
-          dir: /etc/mihomo
-          filename: geoip.dat
+        - url: https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/china-list.txt
+          dir: /var/lib/oxidns/rules
+          filename: china_domain_list.txt
+        - url: https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/gfw.txt
+          dir: /var/lib/oxidns/rules
+          filename: gfw_domain_list.txt
+        - url: https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt
+          dir: /var/lib/oxidns/rules
+          filename: apple_cn_list.txt
+        - url: https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/google-cn.txt
+          dir: /var/lib/oxidns/rules
+          filename: google_cn_list.txt
+        - url: https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/win-spy.txt
+          dir: /var/lib/oxidns/rules
+          filename: win_spy_list.txt
+        - url: https://anti-ad.net/domains.txt
+          dir: /var/lib/oxidns/rules
+          filename: anti-ad-domains.txt
+
+  # 国内 IP 段表（geoip-lite 单码 cn.list，153K）；geosite/geoip.dat 均已删，mihomo 改用 MRS rule-set
+  - tag: download_cn_ip_list
+    type: download
+    args:
+      timeout: 120s
+      startup_if_missing: true
+      downloads:
+        - url: https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geoip/cn.list
+          dir: /var/lib/oxidns/rules
+          filename: cn-ip.list
 
   # ------------------------------------------------------------------
   # provider（规则集）
   # ------------------------------------------------------------------
 
-  - tag: geoip_cn
-    type: geoip
+  # 唯一使用 IP 段的 provider：答案 IP 是否落在 CN（混合链防污染判定）
+  - tag: cn_ips
+    type: ip_set
     args:
-      file: /etc/mihomo/geoip.dat
-      selectors:
-        - cn
+      files:
+        - /var/lib/oxidns/rules/cn-ip.list
 
-  - tag: geosite_cn
-    type: geosite
+  # ---- 国内名单 ----
+  - tag: china_list
+    type: domain_set
     args:
-      file: /etc/mihomo/GeoSite.dat
-      selectors:
-        - cn
-        - apple@cn
-        - google@cn
-        - category-games@cn
-        - category-game-platforms-download
+      files:
+        - /var/lib/oxidns/rules/china_domain_list.txt
 
-  - tag: category_ads_all
-    type: geosite
+  - tag: apple_cn_list
+    type: domain_set
     args:
-      file: /etc/mihomo/GeoSite.dat
-      selectors:
-        - category-ads-all
-        - win-spy
-        - win-extra
+      files:
+        - /var/lib/oxidns/rules/apple_cn_list.txt
+
+  - tag: google_cn_list
+    type: domain_set
+    args:
+      files:
+        - /var/lib/oxidns/rules/google_cn_list.txt
+
+  # 国内域名总入口 = china-list + apple@cn + google@cn + .cn 顶级域 + 自动学习
+  - tag: china_domains
+    type: domain_set
+    args:
+      exps:
+        - domain:cn
+      sets:
+        - china_list
+        - apple_cn_list
+        - google_cn_list
+        - learned_china
+
+  # ---- 国外名单 ----
+  - tag: gfw_list
+    type: domain_set
+    args:
+      files:
+        - /var/lib/oxidns/rules/gfw_domain_list.txt
+
+  - tag: force_noncn
+    type: domain_set
+    args:
+      exps:
+        - domain:pterclub.com
+        - domain:dl.google.com
+        - domain:u2.dmhy.org
+        - domain:gstatic.com
+        - domain:cachix.org
+        - domain:nix-community.cachix.org
+        - domain:cache.numtide.com
+
+  # 国外域名总入口 = gfw.txt + 手写 force_noncn + 自动学习
+  - tag: gfw_domains
+    type: domain_set
+    args:
+      sets:
+        - gfw_list
+        - force_noncn
+        - learned_foreign
+
+  # ---- 广告 / 遥测 ----
+  # 广告名单用 anti-AD 官方 domains.txt（裸域名 = 后缀匹配）；
+  # 白名单（ad-whitelist.txt，从 anti-ad-adguard.txt 的 @@ 例外提取，49 条）在 block_seq 里先判，
+  # 命中就 return 跳过广告拦截（domains.txt 本身不带白名单，必须靠这份补）
+  - tag: ad_whitelist
+    type: domain_set
+    args:
+      files:
+        - /var/lib/oxidns/rules/ad-whitelist.txt
+
+  - tag: ad_rules
+    type: domain_set
+    args:
+      files:
+        - /var/lib/oxidns/rules/anti-ad-domains.txt
+
+  - tag: win_telemetry
+    type: domain_set
+    args:
+      files:
+        - /var/lib/oxidns/rules/win_spy_list.txt
 
   - tag: hosts
     type: hosts
@@ -121,18 +210,6 @@ plugins:
         - v1.micu.hk
         - v2.micu.hk
 
-  - tag: force_noncn
-    type: domain_set
-    args:
-      exps:
-        - domain:pterclub.com
-        - domain:dl.google.com
-        - domain:u2.dmhy.org
-        - domain:gstatic.com
-        - domain:cachix.org
-        - domain:nix-community.cachix.org
-        - domain:cache.numtide.com
-
   - tag: local_ptr
     type: domain_set
     args:
@@ -144,9 +221,56 @@ plugins:
   - tag: reload_rule_providers
     type: reload_provider
     args:
-      - $geoip_cn
-      - $geosite_cn
-      - $category_ads_all
+      - $cn_ips
+      - $china_list
+      - $apple_cn_list
+      - $google_cn_list
+      - $gfw_list
+      - $ad_rules
+      - $win_telemetry
+
+  # ------------------------------------------------------------------
+  # 自动学习（learn_domain → dynamic_domain_set）
+  #   mixed_pipeline 是唯一入口：用真实 IP 解析成功后，按答案 IP 归属回写：
+  #     - 命中 geoip_cn → 学为 learned_china（下次走 cn_pipeline 拿真实 IP）
+  #     - 未命中        → 学为 learned_foreign（下次走 foreign_pipeline 拿 fake-ip）
+  #   phase:after 自带两道闸：rcode==NOERROR 且 answer 非空才学，失败不学（error_mode:continue）。
+  #   名单持久化在 <working-dir>/rules/ 下，重启保留；worker 批量落盘并即时换快照，
+  #   无需 reload_rule_providers 干预。
+  # ------------------------------------------------------------------
+  - tag: learned_china
+    type: dynamic_domain_set
+    args:
+      path: ./rules/learned_china_list.txt
+
+  - tag: learned_foreign
+    type: dynamic_domain_set
+    args:
+      path: ./rules/learned_foreign_list.txt
+
+  - tag: learn_china
+    type: learn_domain
+    args:
+      provider: learned_china
+      phase: after
+      qtypes:
+        - A
+        - AAAA
+      rule_kind: domain
+      async: true
+      error_mode: continue
+
+  - tag: learn_foreign
+    type: learn_domain
+    args:
+      provider: learned_foreign
+      phase: after
+      qtypes:
+        - A
+        - AAAA
+      rule_kind: domain
+      async: true
+      error_mode: continue
 
   # ------------------------------------------------------------------
   # 上游
@@ -253,7 +377,12 @@ plugins:
     args:
       - matches: qtype 65 255
         exec: reject 0
-      - matches: qname $category_ads_all
+      # 白名单优先：命中就 return（block_seq 结束，调用方从 jump 后一条继续），不进广告黑洞
+      - matches: qname $ad_whitelist
+        exec: return
+      - matches: qname $ad_rules
+        exec: $ad_blackhole
+      - matches: qname $win_telemetry
         exec: $ad_blackhole
       - matches: qname $local_ptr
         exec: reject 3
@@ -301,7 +430,7 @@ plugins:
       - matches: has_resp
         exec: accept
 
-  # 流水线 3 · 默认：国内名单→国内链；其余（含漏网之鱼）→国外链 fake-ip
+  # 流水线 3 · 默认：国外名单→国外链；国内名单→国内链；其余（含漏网之鱼）→国外链 fake-ip
   - tag: default_pipeline
     type: sequence
     args:
@@ -312,11 +441,11 @@ plugins:
       - matches: has_resp
         exec: accept
       - exec: jump block_seq
-      - matches: qname $force_noncn
+      - matches: qname $gfw_domains
         exec: $foreign_pipeline
       - matches: has_resp
         exec: accept
-      - matches: qname $geosite_cn
+      - matches: qname $china_domains
         exec: $cn_pipeline
       - matches: has_resp
         exec: accept
@@ -324,24 +453,39 @@ plugins:
       - matches: has_resp
         exec: accept
 
+  # 国外真实 IP 解析段（混合链复用：gfw 名单直接走这里，不碰国内上游）
+  - tag: remote_leg
+    type: sequence
+    args:
+      - exec: $no_ecs
+      - exec: prefer_ipv4
+      - exec: $forward_remote
+      - matches: has_resp
+        exec: $learn_foreign
+      - matches: has_resp
+        exec: accept
+
   # 辅助链 · 混合：国内优先，非国内走国外真实 IP（给 mihomo 自己解析用）
-  # 注意：这里用 resp_ip $geoip_cn 而不是 has_resp 收口 —— 国内 DNS 对国外域名会返回
+  # 注意：这里用 resp_ip $cn_ips 而不是 has_resp 收口 —— 国内 DNS 对国外域名会返回
   # 被污染的答案（实测 www.google.com → 69.171.235.22），只有答案真的落在 CN 才认，
   # 否则继续往下问国外 DoH（fallback 失败时仍返回国内答案兜底）。
+  # 同时是“自动学习”的唯一入口：真实 IP 解析成功后按归属回写 learned_china /
+  # learned_foreign（learn_domain phase:after 自带 NOERROR + 有答案两道闸）。
   - tag: mixed_pipeline
     type: sequence
     args:
       - exec: $hosts
       - matches: has_resp
         exec: accept
+      # 已知国外域名：直接问国外 DoH，省掉一次国内上游（少一次污染风险 + 少一次往返）
+      - matches: qname $gfw_domains
+        exec: jump remote_leg
       - exec: $cn_dns
-      - matches: resp_ip $geoip_cn
+      - matches: resp_ip $cn_ips
+        exec: $learn_china
+      - matches: resp_ip $cn_ips
         exec: accept
-      - exec: $no_ecs
-      - exec: prefer_ipv4
-      - exec: $forward_remote
-      - matches: has_resp
-        exec: accept
+      - exec: jump remote_leg
 
   # ==================================================================
   # 入口

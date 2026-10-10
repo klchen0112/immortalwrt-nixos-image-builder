@@ -69,6 +69,8 @@ ImmortalWrt 25.12 固件构建 + 路由器配置仓库，主机 **a99r50**（Cud
 - 订阅 provider：`cad`（直连可达）、`ikuu`（被 ISP 挡，egress 改走代理组）。
 - 策略组：手动/故转/自动 三套 × 港日台狮美/全部 + 直连，用正则筛选节点。
 - Tailscale 出站：家里 `192.168.0.0/24` 走 tailnet（可选 auth-key 登录，留空回退交互式登录 URL）。
+- **广告过滤开关**：`rule-set,anti-ad,广告拦截` + select 组 `广告拦截: [REJECT, 默认代理]`（default REJECT），一份配置同时带开/关两版，zashboard 或 `PUT /proxies/广告拦截` 即时切换；anti-AD 用官方 `https://anti-ad.net/mihomo.mrs`（846K MRS），Cloudflare 直连被 ISP 挡，所以 provider 带 `proxy: 默认代理`。
+- UI：`external-ui-url` 用 zashboard release 资产 `dist-cdn-fonts.zip`（解包 5.2M，比 gh-pages 版 12.2M 小）。
 
 ## oxidns（DNS 三流水线）
 
@@ -76,7 +78,8 @@ ImmortalWrt 25.12 固件构建 + 路由器配置仓库，主机 **a99r50**（Cud
 - **国外链**：无独立端口，fake-ip 由 mihomo `:6666` 生成。
 - **默认链** `default_pipeline`：入口 `:5335`，国内名单→国内链，其余→国外链。
 - **混合链** `mixed_pipeline`：入口 `:5336`，国内优先，非国内再走国外真实 IP（mihomo 自用）。
-- 规则文件与 mihomo **共用** MetaCubeX `meta-rules-dat` 的 geosite/geoip，日常由 mihomo 写入，oxidns 只在缺失时补下载。
+- **自动学习**：`mixed_pipeline` 真实 IP 解析成功后按归属回写 `learned_china`/`learned_foreign`（`learn_domain` → `dynamic_domain_set`，持久化在 `/var/lib/oxidns/rules/`），并回灌 `default_pipeline` 分流。
+- **无 geosite / geoip.dat**：域名分流用 MetaCubeX `meta-rules-dat@meta` 的单码 MRS（mihomo `rule-providers`，`format: mrs`）与 Loyalsoldier/anti-AD 文本名单（oxidns `domain_set`）；国内 IP 段用 `geo/geoip/cn.list`（oxidns `ip_set`）与单码 MRS（mihomo `behavior: ipcidr`）。名单文件由订阅 cron 下到 `/var/lib/oxidns/rules/` 与 `/etc/mihomo/rules/`（后者用 `path:` 指定可读文件名）。
 - API `192.168.10.1:9199`（WebUI + basic auth）。
 
 验收：
